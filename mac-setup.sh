@@ -68,6 +68,10 @@ setDefaults() {
   # AppKit
   defaults write -g _NS_4445425547 -bool YES # Show an internal AppKit debug menu
 
+  # Orion
+  killall Orion 2>/dev/null
+  defaults write com.kagi.kagimacOS HomePageURL "https://kagi.com"
+
   { set +x; } 2>/dev/null
 }
 

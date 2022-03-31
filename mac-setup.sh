@@ -7,7 +7,6 @@ setDefaults() {
   defaults write com.apple.dock expose-group-apps -bool YES           # Group apps in Expose
   defaults write com.apple.dock mineffect -string suck                # Use the suck animation for minimization
   defaults write com.apple.dock show-recents -bool NO                 # Disable recent apps
-  # Use list for Downloads folder dock tile
   killall Dock 2>/dev/null
 
   # Finder
@@ -63,8 +62,8 @@ setDefaults() {
   defaults write com.apple.menuextra.clock DateFormat -string "EEE MMM d  h:mm:ss"
 
   # Global
-  defaults write -g AppleKeyboardUIMode -int 3                     # Full keyboard access in controls
-  defaults write -g NSQuitAlwaysKeepsWindows -bool YES             # Keep windows on quit
+  defaults write -g AppleKeyboardUIMode -int 3         # Full keyboard access in controls
+  defaults write -g NSQuitAlwaysKeepsWindows -bool YES # Keep windows on quit
 
   # AppKit
   defaults write -g _NS_4445425547 -bool YES # Show an internal AppKit debug menu

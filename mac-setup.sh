@@ -129,6 +129,6 @@ setEnergy() {
   sudo pmset -a autorestart 1
 }
 
-#setDefaults
-#setComputername
+setDefaults
+setComputername
 setEnergy

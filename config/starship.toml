@@ -1,0 +1,202 @@
+# Inserts a blank line between shell prompts
+add_newline = false
+
+command_timeout = 2000
+
+#format = """$battery$character \t$cmd_duration"""
+format = """$username\
+$hostname\
+$localip\
+$shlvl\
+$kubernetes\
+$directory\
+$git_branch\
+$git_commit\
+$git_state\
+$git_metrics\
+$git_status\
+$docker_context\
+$package\
+$cmake\
+$container\
+$dotnet\
+$golang\
+$haskell\
+$helm\
+$java\
+$kotlin\
+$nodejs\
+$php\
+$python\
+$ruby\
+$rust\
+$scala\
+$swift\
+$vlang\
+$vagrant\
+$zig\
+$conda\
+$memory_usage\
+$env_var\
+$custom\
+$sudo\
+$fill$cmd_duration\
+$line_break\
+$jobs\
+$battery\
+$time\
+$status\
+$character """
+
+# Replace the "❯" symbol in the prompt with "➜"
+#[character] # The name of the module we are configuring is "character"
+#success_symbol = "[x](bold green)" # The "success_symbol" segment is being set to "➜" with the color "bold green"
+
+
+[character]
+success_symbol = "[➜](bold green)"
+error_symbol = "[➜](bold red)"
+
+# Disable the package module, hiding it from the prompt completely
+[package]
+disabled = true
+
+[battery]
+empty_symbol = ""
+format = "[$symbol $percentage]($style) "
+[[battery.display]]
+threshold = 10
+style = "bold red"
+charging_symbol = ""
+discharging_symbol = ""
+[[battery.display]]
+threshold = 30
+style = "bold #d14d00"
+charging_symbol = ""
+discharging_symbol = ""
+[[battery.display]]
+threshold = 50
+style = "bold yellow"
+charging_symbol = ""
+discharging_symbol = ""
+[[battery.display]]
+threshold = 80
+style = "bold green"
+charging_symbol = "ﴍ"
+discharging_symbol = ""
+
+[cmd_duration]
+min_time = 500
+show_milliseconds = true
+format = "[underwent](#666666) [$duration](yellow)"
+
+[fill]
+symbol = "."
+
+[git_branch]
+format = "[$symbol:$branch]($style)"
+symbol = ""
+ignore_branches = ["main", "master", "develop"]
+
+[git_state]
+cherry_pick = "[🍒 PICKING](bold red)"
+
+[git_status]
+conflicted = "🏳"
+ahead = "🏎💨${count}"
+behind = "😰${count}"
+diverged = "😵"
+up_to_date = "✓"
+untracked = "🤷"
+stashed = "📦"
+modified = "📝"
+staged = '[++\($count\)](green)'
+renamed = "👅"
+deleted = "🗑"
+
+[git_metrics]
+disabled = false
+
+[memory_usage]
+threshold = 50
+disabled = false
+
+[sudo]
+disabled = false
+
+## Disabled modules
+
+[aws]
+disabled = true
+
+[azure]
+disabled = true
+
+[buf]
+disabled = true
+
+[cobol]
+disabled = true
+
+[conda]
+disabled = true
+
+[crystal]
+disabled = true
+
+[dart]
+disabled = true
+
+[deno]
+disabled = true
+
+[elixir]
+disabled = true
+
+[elm]
+disabled = true
+
+[julia]
+disabled = true
+
+[lua]
+disabled = true
+
+[hg_branch]
+disabled = true
+
+[nim]
+disabled = true
+
+[nix_shell]
+disabled = true
+
+[ocaml]
+disabled = true
+
+[openstack]
+disabled = true
+
+[perl]
+disabled = true
+
+[pulumi]
+disabled = true
+
+[purescript]
+disabled = true
+
+[rlang]
+disabled = true
+
+[red]
+disabled = true
+
+[singularity]
+disabled = true
+
+[terraform]
+disabled = true
+
+[vcsh]
+disabled = true

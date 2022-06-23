@@ -1,0 +1,1 @@
+{"Name":"lima","Metadata":{},"Endpoints":{"docker":{"Host":"unix:///Users/rubeen/.lima/docker/sock/docker.sock","SkipTLSVerify":false}}}

@@ -1,0 +1,45 @@
+[include]
+	path = ~/.config/git/base.gitconfig
+
+[includeIf "gitdir:~/dev/work/"]
+	path = ~/.config/git/work.gitconfig
+[includeIf "gitdir:~/dev/personal/"]
+	path = ~/.config/git/personal.gitconfig
+[includeIf "gitdir:~/dev/edu/"]
+        path = ~/.config/git/personal.gitconfig
+[core]
+	autocrlf = input
+	pager = diff-so-fancy | less --tabs=4 -RFX
+[commit]
+	gpgsign = true
+[gpg]
+	program = /usr/local/MacGPG2/bin/gpg2
+[filter "lfs"]
+	process = git-lfs filter-process
+	required = true
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+[init]
+	defaultBranch = main
+
+[core]
+    pager = delta
+
+
+# settings for git-delta
+[interactive]
+    diffFilter = delta --color-only
+
+[delta]
+    navigate = true  # use n and N to move between diff sections
+    side-by-side = true
+    hyperlinks = true
+
+[merge]
+    conflictstyle = diff3
+
+[diff]
+    colorMoved = default
+
+[pager]
+    blame = true

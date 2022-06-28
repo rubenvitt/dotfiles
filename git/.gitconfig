@@ -24,6 +24,7 @@
 
 [core]
     pager = delta
+	fsmonitor = true
 
 
 # settings for git-delta

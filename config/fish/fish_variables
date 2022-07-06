@@ -4,9 +4,10 @@ SETUVAR __fish_initialized:3400
 SETUVAR _fish_abbr_code:codium
 SETUVAR _fish_abbr_fzf_2D_i:fzf\x20\x2d\x2dpreview\x20\x27bat\x20\x2d\x2dstyle\x3dnumbers\x20\x2d\x2dcolor\x3dalways\x20\x2d\x2dline\x2drange\x20\x3a500\x20\x7b\x7d\x27
 SETUVAR _fish_abbr_ls:lsd
-SETUVAR _fisher_edc_2F_bass_files:/Users/rubeen/\x2econfig/fish/functions/__bass\x2epy\x1e/Users/rubeen/\x2econfig/fish/functions/bass\x2efish
-SETUVAR _fisher_jorgebucaran_2F_fisher_files:/Users/rubeen/\x2econfig/fish/functions/fisher\x2efish\x1e/Users/rubeen/\x2econfig/fish/completions/fisher\x2efish
+SETUVAR _fisher_edc_2F_bass_files:\x7e/\x2econfig/fish/functions/__bass\x2epy\x1e\x7e/\x2econfig/fish/functions/bass\x2efish
+SETUVAR _fisher_jorgebucaran_2F_fisher_files:\x7e/\x2econfig/fish/functions/fisher\x2efish\x1e\x7e/\x2econfig/fish/completions/fisher\x2efish
 SETUVAR _fisher_plugins:jorgebucaran/fisher\x1eedc/bass
+SETUVAR _fisher_upgraded_to_4_4:\x1d
 SETUVAR fish_color_autosuggestion:4c566a
 SETUVAR fish_color_cancel:\x2d\x2dreverse
 SETUVAR fish_color_command:81a1c1

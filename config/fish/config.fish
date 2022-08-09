@@ -10,3 +10,8 @@ starship init fish | source
 
 set -gx PNPM_HOME "/Users/rubeen/Library/pnpm"
 set -gx PATH "$PNPM_HOME" $PATH
+
+# bun
+set -Ux BUN_INSTALL "/Users/rubeen/.bun"
+fish_add_path "/Users/rubeen/.bun/bin"
+

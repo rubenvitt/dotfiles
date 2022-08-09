@@ -1,0 +1,12 @@
+Host rubeen.dev
+	User rubeen
+	HostName rubeen.dev
+	Port 333
+	IdentityFile ~/.ssh/id_ed25519
+	AddKeysToAgent yes
+	UseKeychain yes
+	#SCETerminal com.googlecode.iterm2
+	#SCETags Blue
+
+Host *
+	IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"

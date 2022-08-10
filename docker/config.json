@@ -1,8 +1,8 @@
 {
-	"auths": {
-		"docker.seadrive.org": {},
-		"git.rubeen.dev": {}
-	},
-	"credsStore": "osxkeychain",
-	"currentContext": "lima"
+  "auths": {
+    "docker.seadrive.org": {},
+    "git.rubeen.dev": {}
+  },
+  "credsStore": "desktop",
+  "currentContext": "lima"
 }

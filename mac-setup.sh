@@ -1,5 +1,7 @@
 #!/bin/zsh
 
+trap "exit" INT
+
 #requrire one argument "computername"
 if [ $# -ne 1 ]; then
   echo "Usage: $0 computername"
@@ -9,6 +11,26 @@ fi
 computername=$1
 
 osascript -e 'tell application "System Preferences" to quit'
+
+installBrewAndGum() {
+  if hash brew 2>/dev/null; then
+        echo "brew already installed."
+        brew -v
+  else
+    echo "Installing Homebrew..."
+    /bin/bash -c "$(curl -fsSL 'https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh')"
+  fi
+  brew analytics off
+  brew install gum
+}
+
+askToInstall() {
+  gum confirm "Do you like to install $1" && open $2
+}
+
+askToSetup() {
+  gum confirm "Do you like to setup $1?" && open -a "$2"
+}
 
 setDefaults() {
   set -x
@@ -92,13 +114,6 @@ setDefaults() {
   defaults write -g AppleKeyboardUIMode -int 3         # Full keyboard access in controls
   defaults write -g NSQuitAlwaysKeepsWindows -bool YES # Keep windows on quit
 
-  # AppKit
-  defaults write -g _NS_4445425547 -bool YES # Show an internal AppKit debug menu
-
-  # Orion
-  killall Orion 2>/dev/null
-  defaults write com.kagi.kagimacOS HomePageURL "https://kagi.com"
-
   # Time Machine
   defaults write com.apple.TimeMachine DoNotOfferNewDisksForBackup -bool true # Prevent Time Machine from prompting to use new hard drives as backup volume
 
@@ -129,6 +144,47 @@ setEnergy() {
   sudo pmset -a autorestart 1
 }
 
+softwareInstall() {
+  brew tap kaplanelad/tap
+  brew install \
+    fish fisher starship \
+    lima wget asdf git htop fzf docker docker-compose pinentry lsd zoxide thefuck topgrade mas minikube \
+    shellfirm \
+    1password jetbrains-toolbox setapp iterm2 httpie vscodium nextcloud gpg-suite slack adguard raindropio nvidia-geforce-now
+}
+
+manualSoftwareInstall() {
+  askToInstall "Fuse" "https://osxfuse.github.io"
+  askToSetup "1Password" "1Password"
+  askToSetup "Adguard" "Adguard"
+  askToSetup "Jetbrains Toolbox" "JetBrains Toolbox"
+  askToSetup "Setapp" "Setapp"
+  askToInstall "Fira Code" "https://www.nerdfonts.com/font-downloads"
+  gum confirm "Setup NextCloud?" && mkdir ~/cloud-storage && open "~/cloud-storage" && open -a "Nextcloud" && gum style \
+	--foreground 212 --border-foreground 212 --border double \
+	--align center --width 80 --margin "1 2" --padding "2 4" \
+	'Please sync (at least) following folders:' ' - Ablage' ' - AppDaten' && gum confirm 'Are you ready?'
+  gum confirm "Setup Certificates?" && gum style \
+	--foreground 212 --border-foreground 212 --border double \
+	--align center --width 80 --margin "1 2" --padding "2 4" \
+	'SMIME from Cloud/Zertifikate/SMIME -> KeyChain' 'GPG from Cloud/Zertifikate/GPG -> GPG Suite' && gum confirm 'Are you ready?'
+  gum style --foreground 111  'Installing asdf & latest Temurin'
+  grep -q 'asdf.fish' ~/.config/fish/config.fish || (gum style --foreground 210 'Add asdf-config to fish' && echo -e "\nsource "$(brew --prefix asdf)"/libexec/asdf.fish" >> "~/.config/fish/config.fish")
+  gum confirm "Setup latest Java?" && asdf plugin-add java && asdf install java $(asdf list-all java |fzf)
+  askToInstall 'Safari Technology Preview' 'https://developer.apple.com/safari/technology-preview/'
+  gum style --foreground 50 'Setup Docker' && mkdir -p ~/.docker/cli-plugins && ln -sfn /usr/local/opt/docker-compose/bin/docker-compose ~/.docker/cli-plugins/docker-compose && sudo ln -s ~/.lima/docker/sock/docker.sock /var/run/docker.sock
+  gum style --foreground 190 'Setup Dev folders' && mkdir -p ~/dev/{personal,work,edu} && open ~/dev
+}
+
+setDefaultShell() {
+  sudo sh -c 'echo $(which fish) >> /etc/shells'
+  chsh -s $(which fish)
+}
+
+installBrewAndGum
 setDefaults
 setComputername
 setEnergy
+softwareInstall
+manualSoftwareInstall
+setDefaultShell

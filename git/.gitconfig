@@ -44,3 +44,5 @@
 
 [pager]
     blame = true
+[credential]
+	helper = osxkeychain

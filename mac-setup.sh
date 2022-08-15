@@ -149,8 +149,12 @@ softwareInstall() {
     fish fisher starship \
     lima wget asdf git htop fzf docker docker-compose pinentry lsd zoxide thefuck topgrade mas minikube \
     shellfirm \
-    1password jetbrains-toolbox setapp iterm2 httpie vscodium nextcloud gpg-suite slack adguard raindropio nvidia-geforce-now \
+    1password jetbrains-toolbox setapp httpie vscodium nextcloud gpg-suite slack adguard raindropio nvidia-geforce-now \
     rajiv/fastmate/fastmate
+}
+
+cloneAppDaten() {
+  git clone
 }
 
 manualSoftwareInstall() {
@@ -176,6 +180,7 @@ manualSoftwareInstall() {
   askToInstall 'Safari Technology Preview' 'https://developer.apple.com/safari/technology-preview/'
   gum style --foreground 50 'Setup Docker' && mkdir -p ~/.docker/cli-plugins && ln -sfn /usr/local/opt/docker-compose/bin/docker-compose ~/.docker/cli-plugins/docker-compose && sudo ln -s ~/.lima/docker/sock/docker.sock /var/run/docker.sock
   gum style --foreground 190 'Setup Dev folders' && mkdir -p ~/dev/{personal,work,edu} && open ~/dev
+  gum confirm "Setup Terminal?" && open ~/app-daten && open -a "Terminal" || gum style --foreground 190 "app-daten muss über Nextcloud synchronisiert sein."
 }
 
 setDefaultShell() {

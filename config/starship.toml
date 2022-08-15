@@ -88,10 +88,11 @@ discharging_symbol = ""
 [cmd_duration]
 min_time = 500
 show_milliseconds = true
-format = "[underwent](#666666) [$duration](yellow)"
+format = "[underwent](white) [$duration](yellow)"
 
 [fill]
 symbol = "."
+style = "bold 233"
 
 [git_branch]
 format = "[$symbol:$branch]($style)"

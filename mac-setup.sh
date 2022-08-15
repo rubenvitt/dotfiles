@@ -35,7 +35,6 @@ askToSetup() {
 setDefaults() {
   set -x
 
-  # Dock
   defaults write com.apple.dock showAppExposeGestureEnabled -bool YES # Enable the Expose gesture
   defaults write com.apple.dock mru-spaces -bool NO                   # Disable reordering Spaces based on use
   defaults write com.apple.dock expose-group-apps -bool YES           # Group apps in Expose
@@ -150,7 +149,8 @@ softwareInstall() {
     fish fisher starship \
     lima wget asdf git htop fzf docker docker-compose pinentry lsd zoxide thefuck topgrade mas minikube \
     shellfirm \
-    1password jetbrains-toolbox setapp iterm2 httpie vscodium nextcloud gpg-suite slack adguard raindropio nvidia-geforce-now
+    1password jetbrains-toolbox setapp iterm2 httpie vscodium nextcloud gpg-suite slack adguard raindropio nvidia-geforce-now \
+    rajiv/fastmate/fastmate
 }
 
 manualSoftwareInstall() {
@@ -160,6 +160,8 @@ manualSoftwareInstall() {
   askToSetup "Jetbrains Toolbox" "JetBrains Toolbox"
   askToSetup "Setapp" "Setapp"
   askToInstall "Fira Code" "https://www.nerdfonts.com/font-downloads"
+  askToSetup "Fastmate" "Fastmate"
+
   gum confirm "Setup NextCloud?" && mkdir ~/cloud-storage && open "~/cloud-storage" && open -a "Nextcloud" && gum style \
 	--foreground 212 --border-foreground 212 --border double \
 	--align center --width 80 --margin "1 2" --padding "2 4" \

@@ -188,6 +188,18 @@ setDefaultShell() {
   chsh -s $(which fish)
 }
 
+setDock() {
+  gum style --foreground 190 'Clear Dock' && defaults write com.apple.dock persistent-apps -array
+
+  gum style --foreground 190 'Update Dock'
+  for dockItem in {/System/Applications/Utilities/Terminal,/System/Applications/{"Mail","System Settings","App Store","Music","Photos"},/Applications/{/Setapp/{"BusyCal","NotePlan","2Do"},"Reeder","Slack","Zoom.us"},~/Applications/JetBrains\ Toolbox/{"Fleet","IntelliJ IDEA Ultimate"}}.app; do
+    defaults write com.apple.dock persistent-apps -array-add "$(__dock_item ${dockItem})"
+  done
+
+  gum style --foreground 190 'Restart the Dock'
+  killall Dock
+}
+
 installBrewAndGum
 setDefaults
 setComputername
@@ -195,3 +207,4 @@ setEnergy
 softwareInstall
 manualSoftwareInstall
 setDefaultShell
+gum confirm "Do you like to reinitialize the Dock?" && setDock

@@ -38,6 +38,7 @@ setDefaults() {
   defaults write com.apple.dock showAppExposeGestureEnabled -bool YES # Enable the Expose gesture
   defaults write com.apple.dock mru-spaces -bool NO                   # Disable reordering Spaces based on use
   defaults write com.apple.dock expose-group-apps -bool YES           # Group apps in Expose
+  defaults write com.apple.dock expose-animation-duration -float 0.12
   defaults write com.apple.dock mineffect -string suck                # Use the suck animation for minimization
   defaults write com.apple.dock show-recents -bool NO                 # Disable recent apps
   killall Dock 2>/dev/null
@@ -148,9 +149,9 @@ softwareInstall() {
   brew install \
     fish fisher starship \
     lima wget asdf git htop fzf docker docker-compose pinentry lsd zoxide thefuck topgrade mas minikube \
-    shellfirm \
+    shellfirm xh bat qmk/qmk/qmk \
     1password jetbrains-toolbox setapp httpie vscodium nextcloud gpg-suite slack adguard raindropio nvidia-geforce-now \
-    rajiv/fastmate/fastmate zoom qmk/qmk/qmk bat marta
+    rajiv/fastmate/fastmate zoom parallels protonvpn
 }
 
 cloneAppDaten() {
@@ -158,7 +159,6 @@ cloneAppDaten() {
 }
 
 manualSoftwareInstall() {
-  askToInstall "Fuse" "https://osxfuse.github.io"
   askToSetup "1Password" "1Password"
   askToSetup "Adguard" "Adguard"
   askToSetup "Jetbrains Toolbox" "JetBrains Toolbox"

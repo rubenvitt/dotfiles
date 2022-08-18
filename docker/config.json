@@ -3,6 +3,6 @@
     "docker.seadrive.org": {},
     "git.rubeen.dev": {}
   },
-  "credsStore": "osxkeychain",
+  "credsStore": "desktop",
   "currentContext": "lima"
 }

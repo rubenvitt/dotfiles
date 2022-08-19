@@ -151,7 +151,7 @@ softwareInstall() {
     lima wget asdf git htop fzf docker docker-compose pinentry lsd zoxide thefuck topgrade mas minikube \
     shellfirm xh bat qmk/qmk/qmk \
     1password jetbrains-toolbox setapp httpie vscodium nextcloud gpg-suite slack adguard raindropio nvidia-geforce-now \
-    rajiv/fastmate/fastmate zoom parallels protonvpn thunderbird
+    rajiv/fastmate/fastmate zoom parallels protonvpn
 }
 
 cloneAppDaten() {

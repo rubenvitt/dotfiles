@@ -151,7 +151,7 @@ softwareInstall() {
     lima wget asdf git htop fzf docker docker-compose pinentry lsd zoxide thefuck topgrade mas minikube \
     shellfirm xh bat qmk/qmk/qmk \
     1password jetbrains-toolbox setapp httpie vscodium nextcloud gpg-suite slack adguard raindropio nvidia-geforce-now \
-    rajiv/fastmate/fastmate zoom parallels protonvpn
+    rajiv/fastmate/fastmate zoom parallels protonvpn thunderbird
 }
 
 cloneAppDaten() {
@@ -188,11 +188,20 @@ setDefaultShell() {
   chsh -s $(which fish)
 }
 
+__dock_item() {
+    printf '%s%s%s%s%s' \
+           '<dict><key>tile-data</key><dict><key>file-data</key><dict>' \
+           '<key>_CFURLString</key><string>' \
+           "$1" \
+           '</string><key>_CFURLStringType</key><integer>0</integer>' \
+           '</dict></dict></dict>'
+}
+
 setDock() {
   gum style --foreground 190 'Clear Dock' && defaults write com.apple.dock persistent-apps -array
 
   gum style --foreground 190 'Update Dock'
-  for dockItem in {/System/Applications/Utilities/Terminal,/System/Applications/{"Mail","System Settings","App Store","Music","Photos"},/Applications/{/Setapp/{"BusyCal","NotePlan","2Do"},"Reeder","Slack","Zoom.us"},~/Applications/JetBrains\ Toolbox/{"Fleet","IntelliJ IDEA Ultimate"}}.app; do
+  for dockItem in {/Applications/Safari\ Technology\ Preview,/System/Applications/Utilities/Terminal,/System/Applications/{"Mail","System Settings","App Store","Music","Photos"},/Applications/{/Setapp/{"BusyCal","NotePlan","2Do"},"Reeder","Slack","Zoom.us"},~/Applications/JetBrains\ Toolbox/{"Fleet","IntelliJ IDEA Ultimate"}}.app; do
     defaults write com.apple.dock persistent-apps -array-add "$(__dock_item ${dockItem})"
   done
 

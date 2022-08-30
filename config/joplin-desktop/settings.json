@@ -1,0 +1,41 @@
+{
+	"$schema": "https://joplinapp.org/schema/settings.json",
+	"locale": "de_DE",
+	"api.token": "9482ada10cd97d8def0e5af715508d099395d5dffda1a6ad5a9eb0c13d90eed6bd787ab15af23a11a3638ae068720fa6135587f4ea4e3c3df7c12f7a36704a6d",
+	"markdown.plugin.softbreaks": false,
+	"markdown.plugin.typographer": false,
+	"spellChecker.language": "de",
+	"ui.layout": {
+		"key": "root",
+		"children": [
+			{
+				"key": "sideBar",
+				"width": 250,
+				"visible": true
+			},
+			{
+				"key": "noteList",
+				"width": 250,
+				"visible": true
+			},
+			{
+				"key": "editor",
+				"visible": true
+			}
+		],
+		"visible": true
+	},
+	"noteVisiblePanes": [
+		"editor",
+		"viewer"
+	],
+	"dateFormat": "DD.MM.YYYY",
+	"editor.spellcheckBeta": true,
+	"sync.target": 2,
+	"theme": 1,
+	"themeAutoDetect": false,
+	"preferredDarkTheme": 5,
+	"autoUpdate.includePreReleases": true,
+	"sync.2.path": "/Users/rubeen/dev/test",
+	"editor.codeView": true
+}

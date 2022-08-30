@@ -149,7 +149,7 @@ softwareInstall() {
   brew install \
     fish fisher starship \
     lima wget asdf git htop fzf docker docker-compose pinentry lsd zoxide thefuck topgrade mas minikube \
-    shellfirm xh bat qmk/qmk/qmk \
+    shellfirm xh bat qmk/qmk/qmk dust duf rg fd jq cheat tldr \
     1password jetbrains-toolbox setapp httpie vscodium nextcloud gpg-suite slack adguard raindropio nvidia-geforce-now \
     rajiv/fastmate/fastmate zoom parallels protonvpn alfred
 }

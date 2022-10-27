@@ -46,3 +46,5 @@
     blame = true
 [credential]
 	helper = osxkeychain
+[clone]
+	defaultRemoteName = git

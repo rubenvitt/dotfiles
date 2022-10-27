@@ -1,1 +1,4 @@
+contexts
+.buildNodeID
+.token_seed*
 cli-plugins/docker-compose

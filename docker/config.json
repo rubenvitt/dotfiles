@@ -1,9 +1,10 @@
 {
-  "auths": {
-    "docker.rubeen.dev": {},
-    "docker.seadrive.org": {},
-    "git.rubeen.dev": {},
-    "hub.gwvs.de": {}
-  },
-  "credsStore": "desktop"
+	"auths": {
+		"docker.rubeen.dev": {},
+		"docker.seadrive.org": {},
+		"git.rubeen.dev": {},
+		"hub.gwvs.de": {}
+	},
+	"credsStore": "desktop",
+	"currentContext": "desktop-linux"
 }

@@ -7,6 +7,7 @@ SETUVAR _fish_abbr_df:duf
 SETUVAR _fish_abbr_du:dust
 SETUVAR _fish_abbr_fzf_2D_i:fzf\x20\x2d\x2dpreview\x20\x27bat\x20\x2d\x2dstyle\x3dnumbers\x20\x2d\x2dcolor\x3dalways\x20\x2d\x2dline\x2drange\x20\x3a500\x20\x7b\x7d\x27
 SETUVAR _fish_abbr_ls:lsd
+SETUVAR _fish_abbr_ssh_2D_init:ssh\x2dadd\x20\x2d\x2dapple\x2duse\x2dkeychain\x20\x2essh/rubeen\x2eed25519
 SETUVAR _fisher_edc_2F_bass_files:\x7e/\x2econfig/fish/functions/__bass\x2epy\x1e\x7e/\x2econfig/fish/functions/bass\x2efish
 SETUVAR _fisher_jorgebucaran_2F_fisher_files:\x7e/\x2econfig/fish/functions/fisher\x2efish\x1e\x7e/\x2econfig/fish/completions/fisher\x2efish
 SETUVAR _fisher_plugins:jorgebucaran/fisher\x1eedc/bass

@@ -1,6 +1,8 @@
 [include]
 	path = ~/.config/git/base.gitconfig
 
+[includeIf "gitdir:~/.local/share/gopass"]
+	path = ~/.config/git/personal.gitconfig
 [includeIf "gitdir:~/dev/work/"]
 	path = ~/.config/git/work.gitconfig
 [includeIf "gitdir:~/dev/personal/"]
@@ -48,3 +50,6 @@
 	helper = osxkeychain
 [clone]
 	defaultRemoteName = git
+[user]
+	name = Ruben
+	email = dev@rubeen.one

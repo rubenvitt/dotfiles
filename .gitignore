@@ -10,4 +10,5 @@ config/glab-cli
 config/op
 docker/cli-plugins
 docker/sbom
+config/gh/hosts.yml
 config/configstore/update-notifier-semantic-release-cli.json

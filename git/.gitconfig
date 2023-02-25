@@ -1,8 +1,6 @@
 [include]
 	path = ~/.config/git/base.gitconfig
 
-[includeIf "gitdir:~/.local/share/gopass"]
-	path = ~/.config/git/personal.gitconfig
 [includeIf "gitdir:~/dev/work/"]
 	path = ~/.config/git/work.gitconfig
 [includeIf "gitdir:~/dev/personal/"]
@@ -16,11 +14,6 @@
 	gpgsign = true
 [gpg]
 	program = /usr/local/bin/gpg
-[filter "lfs"]
-	process = git-lfs filter-process
-	required = true
-	clean = git-lfs clean -- %f
-	smudge = git-lfs smudge -- %f
 [init]
 	defaultBranch = main
 
@@ -51,5 +44,9 @@
 [clone]
 	defaultRemoteName = git
 [user]
-	name = Ruben
-	email = dev@rubeen.one
+	name = Ruben Vitt
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true

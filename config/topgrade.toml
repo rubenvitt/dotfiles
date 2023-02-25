@@ -4,6 +4,8 @@
 # Disable specific steps - same options as the command line flag
 #disable = ["pnpm"]
 
+display_preamble = false
+
 # Ignore failures for these steps
 #ignore_failures = ["powershell"]
 

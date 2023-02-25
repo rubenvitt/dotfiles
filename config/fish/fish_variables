@@ -2,7 +2,6 @@
 # VERSION: 3.0
 SETUVAR --export BUN_INSTALL:/Users/rubeen/\x2ebun
 SETUVAR __fish_initialized:3400
-SETUVAR _fish_abbr_code:codium
 SETUVAR _fish_abbr_df:duf
 SETUVAR _fish_abbr_du:dust
 SETUVAR _fish_abbr_fzf_2D_i:fzf\x20\x2d\x2dpreview\x20\x27bat\x20\x2d\x2dstyle\x3dnumbers\x20\x2d\x2dcolor\x3dalways\x20\x2d\x2dline\x2drange\x20\x3a500\x20\x7b\x7d\x27

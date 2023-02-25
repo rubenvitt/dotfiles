@@ -6,4 +6,8 @@ raycast
 wireshark
 yarn
 config/gh/hosts.yml
+config/glab-cli
+config/op
+docker/cli-plugins
+docker/sbom
 config/configstore/update-notifier-semantic-release-cli.json

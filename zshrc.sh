@@ -1,5 +1,5 @@
-zstyle ':znap:*' repos-dir ~/.zsh/plugins
-source ~/.zsh/zsh-snap/znap.zsh
+source ~/.zsh/znap/zsh-snap/znap.zsh
+
 # Enable Powerlevel10k instant prompt. Should stay close to the top of ~/.zshrc.
 # Initialization code that may require console input (password prompts, [y/n]
 # confirmations, etc.) must go above this block; everything else may go below.
@@ -84,10 +84,9 @@ git 1password battery docker docker-compose dotenv gradle npm
 )
 
 znap source marlonrichert/zsh-autocomplete
-#znap source zsh-users/zsh-autosuggestions
+znap source zsh-users/zsh-autosuggestions
 znap source zsh-users/zsh-syntax-highlighting
 source /Users/rubeen/.config/op/plugins.sh
-
 source $ZSH/oh-my-zsh.sh
 
 # User configuration
@@ -115,17 +114,15 @@ source $ZSH/oh-my-zsh.sh
 # Example aliases
 # alias zshconfig="mate ~/.zshrc"
 # alias ohmyzsh="mate ~/.oh-my-zsh"
-alias ls=lsd
-alias la="lsd -la"
-alias ll="lsd -l"
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
 . /usr/local/opt/asdf/libexec/asdf.sh
-eval "$(github-copilot-cli alias -- "$0")"
 
 # pnpm
 export PNPM_HOME="/Users/rubeen/.local/share/pnpm"
 export PATH="$PNPM_HOME:$PATH"
 # pnpm end
+
+eval "$(github-copilot-cli alias -- "$0")"

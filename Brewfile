@@ -67,8 +67,8 @@ cask "bartender"
 cask "chromium"
 cask "easyeda"
 cask "fantastical"
-cask "fastmate"
 cask "font-fira-code-nerd-font"
+cask "font-hack"
 cask "freetube"
 cask "google-chrome"
 cask "gpg-suite"
@@ -82,12 +82,15 @@ cask "little-snitch"
 cask "lunacy"
 cask "micro-snitch"
 cask "microsoft-auto-update"
+cask "microsoft-excel"
 cask "microsoft-powerpoint"
 cask "microsoft-teams"
+cask "microsoft-word"
 cask "netiquette"
 cask "ngrok"
 cask "notion"
 cask "nvidia-geforce-now"
+cask "openin"
 cask "pastebot"
 cask "pichon"
 cask "postbox"
@@ -121,6 +124,7 @@ mas "Keynote", id: 409183694
 mas "Logic Pro", id: 634148309
 mas "MainStage", id: 634159523
 mas "Motion", id: 434290957
+mas "Nautomate", id: 1608529689
 mas "Numbers", id: 409203825
 mas "Pages", id: 409201541
 mas "PDF Expert", id: 1055273043

@@ -64,6 +64,7 @@ cask "adguard"
 cask "affinity-designer"
 cask "alfred"
 cask "bartender"
+cask "blender"
 cask "chromium"
 cask "easyeda"
 cask "fantastical"
@@ -76,7 +77,6 @@ cask "istat-menus"
 cask "iterm2"
 cask "jetbrains-toolbox"
 cask "keka"
-cask "keybase"
 cask "knockknock"
 cask "little-snitch"
 cask "lunacy"
@@ -93,7 +93,6 @@ cask "nvidia-geforce-now"
 cask "openin"
 cask "pastebot"
 cask "pichon"
-cask "postbox"
 cask "raindropio"
 cask "rapidapi"
 cask "raspberry-pi-imager"
@@ -134,4 +133,6 @@ mas "Save to Reader", id: 1640236961
 mas "Telefon", id: 406825478
 mas "TestFlight", id: 899247664
 mas "Things", id: 904280696
+mas "Xcode", id: 497799835
 mas "Yoink", id: 457622435
+mas "Yubico Authenticator", id: 1497506650

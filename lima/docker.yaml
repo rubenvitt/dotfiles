@@ -1,3 +1,7 @@
+###
+# Source: https://raw.githubusercontent.com/lima-vm/lima/master/examples/docker.yaml
+###
+
 # Example to use Docker instead of containerd & nerdctl
 # $ limactl start ./docker.yaml
 # $ limactl shell docker docker run -it -v $HOME:$HOME --rm alpine
@@ -6,27 +10,25 @@
 # $ export DOCKER_HOST=$(limactl list docker --format 'unix://{{.Dir}}/sock/docker.sock')
 # $ docker ...
 
-# source: https://github.com/lima-vm/lima/blob/master/examples/docker.yaml
+# Hint: run `limactl prune` to invalidate the cache
 
+images:
+- location: "https://cloud-images.ubuntu.com/releases/23.04/release/ubuntu-23.04-server-cloudimg-amd64.img"
+  arch: "x86_64"
+  #digest: "sha256:345fbbb6ec827ca02ec1a1ced90f7d40d3fd345811ba97c5772ac40e951458e1"
+- location: "https://cloud-images.ubuntu.com/releases/23.04/release-20230302/ubuntu-23.04-server-cloudimg-arm64.img"
+  arch: "aarch64"
+  #digest: "sha256:f6b5b3a980f28f25fe5203ae74b79cc664ae5505cf255a62f3b01be46ab9967a"
 
 # CPUs • Default: 4
 cpus: 4
 # Memory size • Default: "4GiB"
-memory: "12GiB"
+memory: "16GiB"
 # Disk size • Default: "100GiB"
-disk: "200GiB"
-
-images:
-# Use the latest release
-# Hint: run `limactl prune` to invalidate the cache
-- location: "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-amd64.img"
-  arch: "x86_64"
-- location: "https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-arm64.img"
-  arch: "aarch64"
+disk: "300GiB"
 
 mounts:
 - location: "~"
-  writable: true
 - location: "/tmp/lima"
   writable: true
 # containerd is managed by Docker, not by Lima, so the values are set to false here.
@@ -49,7 +51,6 @@ provision:
     command -v docker >/dev/null 2>&1 && exit 0
     export DEBIAN_FRONTEND=noninteractive
     curl -fsSL https://get.docker.com | sh
-    # NOTE: you may remove the lines below, if you prefer to use rootful docker, not rootless
     systemctl disable --now docker
     apt-get install -y uidmap dbus-user-session
 - mode: user

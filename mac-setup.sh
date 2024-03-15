@@ -1,7 +1,5 @@
 #!/bin/zsh
 
-#!/bin/zsh
-
 trap "echo 'Script interrupted by user'; exit" INT
 
 # Check for exactly one argument: "computername"

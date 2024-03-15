@@ -1,48 +1,64 @@
 #!/bin/zsh
 
-trap "exit" INT
+#!/bin/zsh
 
-#requrire one argument "computername"
+trap "echo 'Script interrupted by user'; exit" INT
+
+# Check for exactly one argument: "computername"
 if [ $# -ne 1 ]; then
-  echo "Usage: $0 computername"
+  echo "Usage: $0 computername - currently $(hostname)"
   exit 1
 fi
 
+echo "Starting setup for $1..."
 computername=$1
 
+# Close System Preferences to prevent conflicts
+echo "Closing System Preferences..."
 osascript -e 'tell application "System Preferences" to quit'
 
+# Function to install Homebrew and Gum
 installBrewAndGum() {
+  echo "Checking for Homebrew..."
   if hash brew 2>/dev/null; then
-        echo "brew already installed."
+        echo "Homebrew is already installed."
         brew -v
   else
     echo "Installing Homebrew..."
     /bin/bash -c "$(curl -fsSL 'https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh')"
   fi
+  echo "Disabling Homebrew analytics..."
   brew analytics off
+  echo "Installing Gum..."
   brew install gum
 }
 
+# Function to ask user for installation confirmation
 askToInstall() {
-  gum confirm "Do you like to install $1" && open $2
+  gum confirm "Do you like to install $1?" && open $2
 }
 
+# Function to ask user for setup confirmation
 askToSetup() {
   gum confirm "Do you like to setup $1?" && open -a "$2"
 }
 
+# Function to set system defaults
 setDefaults() {
+  echo "Applying system defaults..."
   set -x
 
+  # Dock
   defaults write com.apple.dock showAppExposeGestureEnabled -bool YES # Enable the Expose gesture
   defaults write com.apple.dock mru-spaces -bool NO                   # Disable reordering Spaces based on use
   defaults write com.apple.dock expose-group-apps -bool YES           # Group apps in Expose
-  defaults write com.apple.dock expose-animation-duration -float 0.12
+  defaults write com.apple.dock expose-animation-duration -float 0.12 # Set animation duration
   defaults write com.apple.dock mineffect -string suck                # Use the suck animation for minimization
   defaults write com.apple.dock show-recents -bool NO                 # Disable recent apps
+  echo "Restarting Dock to apply changes..."
   killall Dock 2>/dev/null
 
+  # The rest of the defaults go here...
   # Finder
   defaults write com.apple.finder QLEnableTextSelection -bool YES              # Enable text selection from Quick Look
   defaults write com.apple.finder ShowStatusBar -bool YES                      # Show the status bar
@@ -127,66 +143,62 @@ setDefaults() {
   # (e.g. enable Tab in modal dialogs)
   defaults write NSGlobalDomain AppleKeyboardUIMode -int 3
 
+  echo "System defaults applied."
   { set +x; } 2>/dev/null
 }
 
+# Function to set the computer name
 setComputername() {
-  echo "Setting computer name to $computername"
-  exit 2
+  echo "Setting computer name to $computername..."
   sudo scutil --set ComputerName "$computername"
   sudo scutil --set HostName "$computername"
   sudo scutil --set LocalHostName "$computername"
   sudo defaults write /Library/Preferences/SystemConfiguration/com.apple.smb.server NetBIOSName -string "$computername"
 }
 
+# Function to configure energy settings
 setEnergy() {
+  echo "Configuring energy settings..."
   # Restart automatically on power loss
   sudo pmset -a autorestart 1
 }
 
+# Function to install software using Homebrew
 softwareInstall() {
-  brew tap kaplanelad/tap
-  brew install \
-    fish fisher starship \
-    lima wget asdf git htop fzf docker docker-compose pinentry lsd zoxide thefuck topgrade mas minikube \
-    shellfirm xh bat qmk/qmk/qmk dust duf rg fd jq cheat tldr watch \
-    1password jetbrains-toolbox setapp httpie vscodium nextcloud gpg-suite slack adguard raindropio nvidia-geforce-now \
-    rajiv/fastmate/fastmate zoom parallels protonvpn alfred micro-snitch little-snitch \
-    lulu do-not-disturb knockknock taskexplorer reikey netiquette blockblock ransomwhere oversight
+  echo "Installing software from Brewfile..."
+  brew bundle --file ~/dotfiles/Brewfile
 }
 
+# Placeholder for cloneAppDaten function
 cloneAppDaten() {
   git clone
+  # Additional commands for cloning app data
 }
 
+# Function for manual software installation
 manualSoftwareInstall() {
-  askToSetup "1Password" "1Password"
-  askToSetup "Adguard" "Adguard"
-  askToSetup "Jetbrains Toolbox" "JetBrains Toolbox"
-  askToSetup "Setapp" "Setapp"
-  askToInstall "Fira Code" "https://www.nerdfonts.com/font-downloads"
-  askToSetup "Fastmate" "Fastmate"
+  echo "Starting manual software installation..."
 
-  gum confirm "Setup NextCloud?" && mkdir ~/cloud-storage && open "~/cloud-storage" && open -a "Nextcloud" && gum style \
-	--foreground 212 --border-foreground 212 --border double \
-	--align center --width 80 --margin "1 2" --padding "2 4" \
-	'Please sync (at least) following folders:' ' - Ablage' ' - AppDaten' && gum confirm 'Are you ready?'
-  gum confirm "Setup Certificates?" && gum style \
-	--foreground 212 --border-foreground 212 --border double \
-	--align center --width 80 --margin "1 2" --padding "2 4" \
-	'SMIME from Cloud/Zertifikate/SMIME -> KeyChain' 'GPG from Cloud/Zertifikate/GPG -> GPG Suite' && gum confirm 'Are you ready?'
   gum style --foreground 111  'Installing asdf & latest Temurin'
   grep -q 'asdf.fish' ~/.config/fish/config.fish || (gum style --foreground 210 'Add asdf-config to fish' && echo -e "\nsource "$(brew --prefix asdf)"/libexec/asdf.fish" >> "~/.config/fish/config.fish")
   gum confirm "Setup latest Java?" && asdf plugin-add java && asdf install java $(asdf list-all java |fzf)
+  gum confirm "Setup latest Node?" && asdf plugin-add nodejs && asdf install nodejs latest
   askToInstall 'Safari Technology Preview' 'https://developer.apple.com/safari/technology-preview/'
-  gum style --foreground 50 'Setup Docker' && mkdir -p ~/.docker/cli-plugins && ln -sfn /usr/local/opt/docker-compose/bin/docker-compose ~/.docker/cli-plugins/docker-compose && sudo ln -s ~/.lima/docker/sock/docker.sock /var/run/docker.sock
   gum style --foreground 190 'Setup Dev folders' && mkdir -p ~/dev/{personal,work,edu} && open ~/dev
-  gum confirm "Setup Terminal?" && open ~/app-daten && open -a "Terminal" || gum style --foreground 190 "app-daten muss über Nextcloud synchronisiert sein."
 }
 
+# Function to set the default shell
 setDefaultShell() {
-  sudo sh -c 'echo $(which fish) >> /etc/shells'
-  chsh -s $(which fish)
+  echo "Setting the default shell..."
+  FISH_PATH=$(which fish)
+  if ! grep -q "$FISH_PATH" /etc/shells; then
+    echo "Adding $FISH_PATH to /etc/shells"
+    sudo sh -c "echo $FISH_PATH >> /etc/shells"
+  else
+    echo "$FISH_PATH is already in /etc/shells"
+  fi
+  chsh -s "$FISH_PATH"
+  echo "Default shell changed to $FISH_PATH"
 }
 
 __dock_item() {
@@ -198,11 +210,27 @@ __dock_item() {
            '</dict></dict></dict>'
 }
 
+# Function to configure the Dock
 setDock() {
+  echo "Configuring the Dock..."
+
   gum style --foreground 190 'Clear Dock' && defaults write com.apple.dock persistent-apps -array
 
   gum style --foreground 190 'Update Dock'
-  for dockItem in {/Applications/Safari\ Technology\ Preview,/System/Applications/Utilities/Terminal,/System/Applications/{"Mail","System Settings","App Store","Music","Photos"},/Applications/{/Setapp/{"BusyCal","NotePlan","2Do"},"Reeder","Slack","Zoom.us"},~/Applications/JetBrains\ Toolbox/{"Fleet","IntelliJ IDEA Ultimate"}}.app; do
+
+  declare -a dockItems=(
+    "/Applications/Safari Technology Preview.app"
+    "/Applications/Arc.app"
+    "/Applications/Warp.app"
+    "/Applications/Notion.app"
+    "/Applications/BusyCal.app"
+    "/System/Applications/Mail.app"
+    "/System/Applications/Music.app"
+    "/Users/rubeen/Applications/Fleet.app"
+    "/Users/rubeen/Applications/IntelliJ IDEA Ultimate.app"
+  )
+
+  for dockItem in "${dockItems[@]}"; do
     defaults write com.apple.dock persistent-apps -array-add "$(__dock_item ${dockItem})"
   done
 
@@ -210,6 +238,17 @@ setDock() {
   killall Dock
 }
 
+setupSymlinks() {
+  echo "Setting up Symlinks..."
+
+  ln -s ~/.dotfiles/ssh/config ~/.ssh/config
+  ln -s ~/.dotfiles/git/.gitconfig ~/.gitconfig
+  ln -s ~/.dotfiles/testcontainers.properties ~/.testcontainers.properties
+  ln -s ~/.dotfiles/fish ~/.config/
+  ln -s ~/.dotfiles/vimrc ~/.vimrc
+}
+
+# Executing functions
 installBrewAndGum
 setDefaults
 setComputername
@@ -217,4 +256,7 @@ setEnergy
 softwareInstall
 manualSoftwareInstall
 setDefaultShell
+setupSymlinks
 gum confirm "Do you like to reinitialize the Dock?" && setDock
+
+echo "Setup complete!"

@@ -239,6 +239,7 @@ setDock() {
 setupSymlinks() {
   echo "Setting up Symlinks..."
 
+  mkdir -p ~/.ssh/configs
   ln -s ~/.dotfiles/ssh/config ~/.ssh/config
   ln -s ~/.dotfiles/git/.gitconfig ~/.gitconfig
   ln -s ~/.dotfiles/testcontainers.properties ~/.testcontainers.properties

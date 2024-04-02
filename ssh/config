@@ -1,2 +1,6 @@
+Include ~/.orbstack/ssh/config
+
+Include ~/.ssh/configs/* # local ssh configs
+
 Host *
-	IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+	IdentityAgent '/Users/rubeen/Library/Group Containers/2BUA8C4S2C.com.1password/t'/agent.sock

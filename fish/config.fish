@@ -1,7 +1,7 @@
-set -gx PATH $PATH /opt/homebrew/anaconda3/bin
+set -gx PATH $PATH /usr/local/homebrew/anaconda3/bin
 set -gx PATH $PATH /Users/rubeen/dev/general/tools/bin
-eval "$(/opt/homebrew/bin/brew shellenv)"
-source /opt/homebrew/opt/asdf/libexec/asdf.fish
+source /usr/local/opt/asdf/libexec/asdf.fish
+eval (/usr/local/bin/brew shellenv)
 
 
 if status is-interactive
@@ -11,6 +11,7 @@ if status is-interactive
     alias la="eza -la"
     eval "$(orb completion fish)"
     eval "$(docker completion fish)"
+    eval "$(gh completion --shell fish)"
     # Commands to run in interactive sessions can go here
 end
 

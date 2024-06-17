@@ -1,7 +1,6 @@
-set -gx PATH $PATH /usr/local/homebrew/anaconda3/bin
-set -gx PATH $PATH /Users/rubeen/dev/general/tools/bin
-source /usr/local/opt/asdf/libexec/asdf.fish
-eval (/usr/local/bin/brew shellenv)
+set -gx PATH $PATH /opt/homebrew/anaconda3/bin
+set -gx PATH $PATH /Users/rvitt/dev/general/tools/bin
+eval (/opt/homebrew/bin/brew shellenv)
 
 
 if status is-interactive
@@ -9,14 +8,16 @@ if status is-interactive
     alias ls="eza"
     alias ll="eza -ll"
     alias la="eza -la"
-    eval "$(orb completion fish)"
+    if command -v orb >/dev/null 2>&1
+      eval "$(orb completion fish)"
+    end
     eval "$(docker completion fish)"
     eval "$(gh completion --shell fish)"
     # Commands to run in interactive sessions can go here
 end
 
 # pnpm
-set -gx PNPM_HOME "/Users/rubeen/Library/pnpm"
+set -gx PNPM_HOME "/Users/rvitt/Library/pnpm"
 if not string match -q -- $PNPM_HOME $PATH
   set -gx PATH "$PNPM_HOME" $PATH
 end
@@ -28,5 +29,11 @@ set -x MAVEN_OPTS "-Duser.language=en_US.UTF-8"
 set -x LANG "en_US.UTF-8"
 set -x LC_ALL "en_US.UTF-8"
 set -x PATH "/Library/Frameworks/Python.framework/Versions/3.12/bin" "$PATH"
+
 alias copilot='gh copilot'
 zoxide init --cmd cd fish | source
+
+source /opt/homebrew/opt/asdf/libexec/asdf.fish
+
+# Created by `pipx` on 2024-05-31 14:45:00
+set PATH $PATH /Users/rvitt/.local/bin

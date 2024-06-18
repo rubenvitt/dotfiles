@@ -1,7 +1,5 @@
 tap "derailed/k9s"
 tap "homebrew/bundle"
-tap "homebrew/cask-fonts"
-tap "homebrew/cask-versions"
 tap "remotemobprogramming/brew"
 brew "asdf"
 brew "atuin"

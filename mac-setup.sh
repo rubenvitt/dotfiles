@@ -178,6 +178,7 @@ manualSoftwareInstall() {
   echo "Starting manual software installation..."
 
   gum style --foreground 111  'Installing asdf & latest Temurin'
+  mkdir -p ~/.config/fish && touch ~/.config/fish/config.fish
   grep -q 'asdf.fish' ~/.config/fish/config.fish || (gum style --foreground 210 'Add asdf-config to fish' && echo -e "\nsource "$(brew --prefix asdf)"/libexec/asdf.fish" >> "~/.config/fish/config.fish")
   gum confirm "Setup latest Java?" && asdf plugin-add java && asdf install java $(asdf list-all java |fzf)
   gum confirm "Setup latest Node?" && asdf plugin-add nodejs && asdf install nodejs latest

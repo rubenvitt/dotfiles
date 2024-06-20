@@ -43,13 +43,14 @@ brew "zoxide"
 brew "zsh"
 brew "derailed/k9s/k9s"
 brew "remotemobprogramming/brew/mob"
+cask "1password"
 cask "1password-cli"
 cask "alt-tab"
+cask "arc"
 cask "bartender"
 cask "beeper"
 cask "betterdisplay"
 cask "bettertouchtool"
-cask "busycal"
 cask "chatgpt"
 cask "discord"
 cask "firefox"
@@ -89,4 +90,3 @@ mas "Shortery", id: 1594183810
 mas "Tailscale", id: 1475387142
 mas "TestFlight", id: 899247664
 mas "Things", id: 904280696
-mas "Xcode", id: 497799835

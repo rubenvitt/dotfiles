@@ -3,7 +3,7 @@
 
 [includeIf "gitdir:~/dev/work/"]
 	path = ~/.config/git/work.gitconfig
-[includeIf "gitdir:~/.dotfiles"]
+[includeIf "gitdir:~/.dotfiles/"]
         path = ~/.config/git/personal.gitconfig
 [includeIf "gitdir:~/dev/personal/"]
 	path = ~/.config/git/personal.gitconfig

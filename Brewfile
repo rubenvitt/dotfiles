@@ -1,5 +1,7 @@
 tap "derailed/k9s"
 tap "homebrew/bundle"
+tap "homebrew/cask-fonts"
+tap "homebrew/cask-versions"
 tap "remotemobprogramming/brew"
 brew "asdf"
 brew "atuin"
@@ -45,13 +47,13 @@ brew "derailed/k9s/k9s"
 brew "remotemobprogramming/brew/mob"
 cask "1password"
 cask "1password-cli"
-cask "alt-tab"
 cask "arc"
+cask "alt-tab"
 cask "bartender"
 cask "beeper"
 cask "betterdisplay"
 cask "bettertouchtool"
-cask "chatgpt"
+cask "busycal"
 cask "discord"
 cask "firefox"
 cask "firefox@developer-edition"
@@ -76,6 +78,7 @@ cask "swish"
 cask "telegram"
 cask "thunderbird"
 cask "tradingview"
+cask "vmware-fusion"
 cask "zed"
 cask "zoom"
 mas "1Password for Safari", id: 1569813296
@@ -90,3 +93,4 @@ mas "Shortery", id: 1594183810
 mas "Tailscale", id: 1475387142
 mas "TestFlight", id: 899247664
 mas "Things", id: 904280696
+mas "Xcode", id: 497799835

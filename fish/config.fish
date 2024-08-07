@@ -1,5 +1,5 @@
 set -gx PATH $PATH /opt/homebrew/anaconda3/bin
-set -gx PATH $PATH /Users/rvitt/dev/general/tools/bin
+set -gx PATH $PATH /Users/rubeen/dev/general/tools/bin
 eval (/opt/homebrew/bin/brew shellenv)
 
 
@@ -17,7 +17,7 @@ if status is-interactive
 end
 
 # pnpm
-set -gx PNPM_HOME "/Users/rvitt/Library/pnpm"
+set -gx PNPM_HOME "/Users/rubeen/Library/pnpm"
 if not string match -q -- $PNPM_HOME $PATH
   set -gx PATH "$PNPM_HOME" $PATH
 end
@@ -36,4 +36,4 @@ zoxide init --cmd cd fish | source
 source /opt/homebrew/opt/asdf/libexec/asdf.fish
 
 # Created by `pipx` on 2024-05-31 14:45:00
-set PATH $PATH /Users/rvitt/.local/bin
+set PATH $PATH /Users/rubeen/.local/bin

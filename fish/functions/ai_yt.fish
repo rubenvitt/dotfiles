@@ -20,23 +20,13 @@ function ai_yt
     set temp_file (mktemp)
 
     # Execute fabric -p with the selected argument and append the yt_result, then save to temp_file
-    fabric -p "$fabric_arg" --text "$yt_result" | fabric -p tana_paste > $temp_file
+    fabric -p "$fabric_arg" --text "$yt_result" | fabric -p r_translate > $temp_file
 
-        # Process the temp_file to remove quotes from lines with #quote
-        set processed_file (mktemp)
-        cat $temp_file | while read -l line
-            if string match -q '*#quote*' -- $line
-                set line (string replace -ra '"' '' -- $line)
-            end
-            echo $line
-        end > $processed_file
-
-        cat $processed_file | glow
+        cat $temp_file | glow
 
         # Copy the contents of the processed file to clipboard
-        cat $processed_file | pbcopy
+        cat $temp_file | pbcopy
 
         # Remove the temporary files
         rm $temp_file
-        rm $processed_file
 end

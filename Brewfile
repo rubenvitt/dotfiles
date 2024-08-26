@@ -1,5 +1,6 @@
 tap "derailed/k9s"
 tap "homebrew/bundle"
+tap "julien040/gut"
 tap "remotemobprogramming/brew"
 brew "asdf"
 brew "atuin"
@@ -13,6 +14,8 @@ brew "ffmpeg"
 brew "fish"
 brew "fzf"
 brew "gh"
+brew "git"
+brew "git-delta"
 brew "git-extras"
 brew "git-lfs"
 brew "glab"
@@ -51,6 +54,7 @@ cask "alt-tab"
 cask "arc"
 cask "bartender"
 cask "betterdisplay"
+cask "box-drive"
 cask "firefox"
 cask "firefox@developer-edition"
 cask "font-fantasque-sans-mono-nerd-font"
@@ -63,6 +67,12 @@ cask "jetbrains-toolbox"
 cask "macfuse"
 cask "macupdater"
 cask "mediamate"
+cask "microsoft-auto-update"
+cask "microsoft-excel"
+cask "microsoft-outlook"
+cask "microsoft-powerpoint"
+cask "microsoft-teams"
+cask "microsoft-word"
 cask "miro"
 cask "notion"
 cask "obsidian"
@@ -73,8 +83,10 @@ cask "slack"
 cask "swish"
 cask "thunderbird"
 cask "todoist"
+cask "tor-browser"
 cask "tradingview"
 cask "vmware-fusion"
+cask "wezterm"
 cask "zed"
 cask "zoom"
 mas "1Password for Safari", id: 1569813296
@@ -86,14 +98,12 @@ mas "Keymapp", id: 6472865291
 mas "Keynote", id: 409183694
 mas "Local Calendar Sync", id: 6478960914
 mas "Logic Pro", id: 634148309
-mas "Microsoft Excel", id: 462058435
-mas "Microsoft Word", id: 462054704
 mas "Notchmeister", id: 1599169747
 mas "Numbers", id: 409203825
 mas "Pages", id: 409201541
 mas "Parcel", id: 639968404
 mas "PDF Expert", id: 1055273043
+mas "Reeder", id: 1529448980
 mas "Shortery", id: 1594183810
 mas "Tailscale", id: 1475387142
 mas "TestFlight", id: 899247664
-mas "Xcode", id: 497799835

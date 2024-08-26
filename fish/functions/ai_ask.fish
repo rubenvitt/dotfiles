@@ -1,4 +1,4 @@
-function ai
+function ai_ask
     set content_arg $argv[1]
     set fabric_arg $argv[2]
 
@@ -11,7 +11,7 @@ function ai
 
     # Check if fabric_arg is provided, if not, prompt with gum and list selections
     if test -z "$fabric_arg"
-        set fabric_arg (fabric --list | gum filter --placeholder "Select fabric argument:")
+        set fabric_arg (fabric --listpatterns | sed '1,2d' | tr -d ' ' | tr -d '\t' | gum filter --placeholder "Select fabric argument:")
     end
 
 
@@ -19,7 +19,7 @@ function ai
     set temp_file (mktemp)
 
     # Execute fabric -p with the selected argument and append the yt_result, then save to temp_file
-    fabric -p "$fabric_arg" --text "$content_arg" > $temp_file
+    fabric -p "$fabric_arg" "$content_arg" > $temp_file
         cat $temp_file | glow
         # Copy the contents of the processed file to clipboard
         cat $temp_file | pbcopy

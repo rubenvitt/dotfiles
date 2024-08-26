@@ -12,7 +12,7 @@ function ai_https
 
     # Check if fabric_arg is provided, if not, prompt with gum and list selections
     if test -z "$fabric_arg"
-        set fabric_arg (fabric --list | gum filter --placeholder "Select fabric argument:")
+        set fabric_arg (fabric --listpatterns | sed '1,2d' | tr -d ' ' | tr -d '\t' | gum filter --placeholder "Select fabric argument:")
     end
 
 
@@ -20,7 +20,7 @@ function ai_https
     set temp_file (mktemp)
 
     # Execute fabric -p with the selected argument and append the yt_result, then save to temp_file
-    fabric -p "$fabric_arg" --text "$curl_arg:\n$curl_result" | fabric -p r_translate > $temp_file
+    fabric -p "$fabric_arg" "$curl_arg:\n$curl_result" | fabric -p r_translate > $temp_file
 
         cat $temp_file | glow
 

@@ -9,6 +9,7 @@ brew "bfg"
 brew "btop"
 brew "direnv"
 brew "docker"
+brew "doggo"
 brew "eza"
 brew "ffmpeg"
 brew "fish"
@@ -25,11 +26,14 @@ brew "helm"
 brew "htop"
 brew "httpie"
 brew "iproute2mac"
+brew "jj"
 brew "jq"
 brew "kubernetes-cli"
 brew "kubectx"
 brew "mas"
+brew "mkcert"
 brew "nmap"
+brew "nss"
 brew "pandoc"
 brew "pipx"
 brew "pnpm"
@@ -51,19 +55,24 @@ brew "remotemobprogramming/brew/mob"
 cask "1password"
 cask "1password-cli"
 cask "alt-tab"
+cask "ankerwork"
 cask "arc"
-cask "bartender"
 cask "betterdisplay"
 cask "box-drive"
+cask "chatgpt"
+cask "citrix-workspace"
+cask "elgato-wave-link"
 cask "firefox"
 cask "firefox@developer-edition"
 cask "font-fantasque-sans-mono-nerd-font"
 cask "font-fira-code-nerd-font"
+cask "google-chrome@canary"
 cask "gpg-suite"
 cask "heptabase"
 cask "istat-menus"
 cask "iterm2"
 cask "jetbrains-toolbox"
+cask "jordanbaird-ice"
 cask "macfuse"
 cask "macupdater"
 cask "mediamate"
@@ -74,13 +83,23 @@ cask "microsoft-powerpoint"
 cask "microsoft-teams"
 cask "microsoft-word"
 cask "miro"
+cask "msty"
+cask "musescore"
+cask "nordvpn"
 cask "notion"
 cask "obsidian"
+cask "orbstack"
+cask "parallels"
+cask "pitch"
 cask "raindropio"
 cask "raycast"
 cask "reader"
+cask "setapp"
 cask "slack"
+cask "soundsource"
+cask "steam"
 cask "swish"
+cask "teamviewer"
 cask "thunderbird"
 cask "todoist"
 cask "tor-browser"
@@ -94,16 +113,14 @@ mas "Compressor", id: 424390742
 mas "Final Cut Pro", id: 424389933
 mas "GarageBand", id: 682658836
 mas "iMovie", id: 408981434
-mas "Keymapp", id: 6472865291
 mas "Keynote", id: 409183694
 mas "Local Calendar Sync", id: 6478960914
 mas "Logic Pro", id: 634148309
-mas "Notchmeister", id: 1599169747
 mas "Numbers", id: 409203825
 mas "Pages", id: 409201541
 mas "Parcel", id: 639968404
 mas "PDF Expert", id: 1055273043
-mas "Reeder", id: 1529448980
+mas "Reeder", id: 6475002485
 mas "Shortery", id: 1594183810
 mas "Tailscale", id: 1475387142
 mas "TestFlight", id: 899247664

@@ -164,7 +164,7 @@ setEnergy() {
 # Function to install software using Homebrew
 softwareInstall() {
   echo "Installing software from Brewfile..."
-  brew bundle --file ~/dotfiles/Brewfile
+  brew bundle --file ~/.dotfiles/Brewfile
 }
 
 # Placeholder for cloneAppDaten function

@@ -1,22 +1,25 @@
 function tana_format
-    set input $argv[1]
-
-    # Check if input is provided, if not, check if pbpaste is available, else ask with gum
-    if test -z "$input"
-        set input (gum input --placeholder "Enter content:")
-    end
-
-    # Create a temporary file
     set temp_file (mktemp)
 
-    # Execute fabric -p with the selected argument and append the yt_result, then save to temp_file
-    fabric -p tana_paste --text "$input" > $temp_file
+    if test (count $argv) -eq 0
+        # Wenn keine Argumente übergeben wurden, verwende pbpaste
+        if type -q pbpaste
+            pbpaste | fabric -p tana_paste > $temp_file
+        else
+            # Wenn pbpaste nicht verfügbar ist, frage mit gum
+            gum input --placeholder "Geben Sie den Inhalt ein:" | fabric -p tana_paste > $temp_file
+        end
+    else
+        # Wenn Argumente übergeben wurden, verwende sie alle
+        printf '%s\n' $argv | fabric -p tana_paste > $temp_file
+    end
 
+    # Zeige den Inhalt der verarbeiteten Datei an
     cat $temp_file | glow
 
-    # Copy the contents of the processed file to clipboard
+    # Kopiere den Inhalt der verarbeiteten Datei in die Zwischenablage
     cat $temp_file | pbcopy
 
-    # Remove the temporary files
-    rm $temp_file
+    # Entferne die temporäre Datei
+    rip $temp_file
 end

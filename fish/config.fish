@@ -8,6 +8,7 @@ if status is-interactive
     alias ls="eza"
     alias ll="eza -ll"
     alias la="eza -la"
+    alias rm="echo Use 'rip' instead of rm: rip"
     if command -v orb >/dev/null 2>&1
       eval "$(orb completion fish)"
     end
@@ -37,3 +38,5 @@ source /opt/homebrew/opt/asdf/libexec/asdf.fish
 
 # Created by `pipx` on 2024-05-31 14:45:00
 set PATH $PATH /Users/rubeen/.local/bin
+set -gx PATH /Users/rubeen/dev/general/tools $PATH
+source /Users/rubeen/.config/op/plugins.sh

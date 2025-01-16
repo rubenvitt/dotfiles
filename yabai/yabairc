@@ -33,10 +33,11 @@ yabai -m config external_bar               all:0:0       \
 yabai -m rule --add app="^(LuLu|Calculator|Software Update|Dictionary|VLC|System Preferences|System Settings|Systemeinstellungen|zoom.us|Photo Booth|Archive Utrrility|Python|LibreOffice|App Store|Steam|Alfred|Activity Monitor)$" manage=off
 yabai -m rule --add app="^(CitrixEndpointAnalysis|Vorta|Citrix Viewer|Wave Link)$" manage=off
 yabai -m rule --add app="^(Microsoft Teams)$" title="^(Microsoft Teams meeting)$" manage=off
-yabai -m rule --add label="Finder" app="^Finder$" title="(Co(py|nnect)|Move|Info|Pref)" manage=off
+yabai -m rule --add label="Finder" app="^Finder$" title="(Co(py|nnect)|Move|Info|Pref|Kopieren)" manage=off
 yabai -m rule --add label="Safari" app="^Safari$" title="^(General|(Tab|Password|Website|Extension)s|AutoFill|Se(arch|curity)|Privacy|Advance)$" manage=off
 yabai -m rule --add label="About This Mac" app="System Information" title="About This Mac" manage=off
 yabai -m rule --add label="Select file to save to" app="^Inkscape$" title="Select file to save to" manage=off
+yabai -m rule --add app="^Ghostty$" subrole="AXFloatingWindow" layer=above manage=off sticky=on
 
 yabai -m rule --add app="^BusyCal$" title="^Alarm" manage=off
 

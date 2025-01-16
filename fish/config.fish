@@ -39,4 +39,6 @@ source /opt/homebrew/opt/asdf/libexec/asdf.fish
 # Created by `pipx` on 2024-05-31 14:45:00
 set PATH $PATH /Users/rubeen/.local/bin
 set -gx PATH /Users/rubeen/dev/general/tools $PATH
+set -Ux fish_user_paths /Users/rubeen/dev/general/tools $fish_user_paths
 source /Users/rubeen/.config/op/plugins.sh
+

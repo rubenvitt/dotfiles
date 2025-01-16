@@ -15,7 +15,7 @@ function ai_ask
     end
 
     # Prompt the user to choose between 'r_translate' or 'tana_paste'
-    set processing_method (gum choose "r_translate" "tana_paste" --placeholder "Select processing method:")
+    set processing_method (gum choose "r_translate" "tana_paste" --header "Select processing method:")
 
     # Create a temporary file
     set temp_file (mktemp)

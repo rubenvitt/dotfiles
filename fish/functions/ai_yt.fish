@@ -17,7 +17,7 @@ function ai_yt_de
         set fabric_arg (fabric --listpatterns | sed '1,2d' | tr -d ' ' | gum filter --placeholder "Select fabric argument:")
     end
 
-    set processing_method (gum choose "r_translate" "tana_paste" --placeholder "Select processing method:")
+    set processing_method (gum choose "r_translate" "tana_paste" --header "Select processing method:")
 
     set temp_file (mktemp)
 

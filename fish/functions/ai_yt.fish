@@ -1,4 +1,4 @@
-function ai_yt_de
+function ai_yt
     set yt_arg $argv[1]
     set fabric_arg $argv[2]
 

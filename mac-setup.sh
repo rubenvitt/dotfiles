@@ -53,6 +53,8 @@ setDefaults() {
   defaults write com.apple.dock expose-animation-duration -float 0.12 # Set animation duration
   defaults write com.apple.dock mineffect -string suck                # Use the suck animation for minimization
   defaults write com.apple.dock show-recents -bool NO                 # Disable recent apps
+  defaults write com.apple.dock autohide-delay -float 0; killall Dock
+  defaults write com.apple.dock autohide-time-modifier -float 0.15; killall Dock
   echo "Restarting Dock to apply changes..."
   killall Dock 2>/dev/null
 

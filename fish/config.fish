@@ -8,7 +8,6 @@ if status is-interactive
     alias ls="eza"
     alias ll="eza -ll"
     alias la="eza -la"
-    alias rm="echo Use 'rip' instead of rm: rip"
     if command -v orb >/dev/null 2>&1
       eval "$(orb completion fish)"
     end
@@ -39,6 +38,14 @@ source /opt/homebrew/opt/asdf/libexec/asdf.fish
 # Created by `pipx` on 2024-05-31 14:45:00
 set PATH $PATH /Users/rubeen/.local/bin
 set -gx PATH /Users/rubeen/dev/general/tools $PATH
+set -gx PATH /Users/rubeen/.asdf/shims $PATH
 set -Ux fish_user_paths /Users/rubeen/dev/general/tools $fish_user_paths
 source /Users/rubeen/.config/op/plugins.sh
 
+
+# Added by LM Studio CLI (lms)
+set -gx PATH $PATH /Users/rubeen/.lmstudio/bin
+
+# Added by OrbStack: command-line tools and integration
+# This won't be added again if you remove it.
+source ~/.orbstack/shell/init2.fish 2>/dev/null || :

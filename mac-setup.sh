@@ -50,11 +50,14 @@ setDefaults() {
   defaults write com.apple.dock showAppExposeGestureEnabled -bool YES # Enable the Expose gesture
   defaults write com.apple.dock mru-spaces -bool NO                   # Disable reordering Spaces based on use
   defaults write com.apple.dock expose-group-apps -bool YES           # Group apps in Expose
-  defaults write com.apple.dock expose-animation-duration -float 0.12 # Set animation duration
+  defaults write com.apple.dock expose-animation-duration -float 0.05 # Set animation duration
+  defaults write com.apple.dock springboard-show-duration -float 0.1  # Set animation duration
+  defaults write com.apple.dock springboard-hide-duration -float 0.1  # Set animation duration
   defaults write com.apple.dock mineffect -string suck                # Use the suck animation for minimization
   defaults write com.apple.dock show-recents -bool NO                 # Disable recent apps
-  defaults write com.apple.dock autohide-delay -float 0; killall Dock
-  defaults write com.apple.dock autohide-time-modifier -float 0.15; killall Dock
+  defaults write com.apple.dock autohide-delay -float 0               # Remove delay before showing
+  defaults write com.apple.dock autohide-time-modifier -float 0.15    # Set animation duration
+
   echo "Restarting Dock to apply changes..."
   killall Dock 2>/dev/null
 
@@ -73,6 +76,8 @@ setDefaults() {
   defaults write com.apple.desktopservices DSDontWriteNetworkStores -bool true # Disable creation of .DS_Store files on network volumes
   defaults write com.apple.desktopservices DSDontWriteUSBStores -bool true     # Disable creation of .DS_Store files on USB volumes
   defaults write com.apple.finder WarnOnEmptyTrash -bool false                 # Disable the warning before emptying the Trash
+  # Fenster-Animationen schneller
+  defaults write NSGlobalDomain NSWindowResizeTime -float 0.1                  # Set window resize time to 0.1 seconds
   chflags nohidden ~/Library && xattr -d com.apple.FinderInfo ~/Library        # Show the ~/Library folder
 
   sudo chflags nohidden /Volumes # Show the /Volumes folder
@@ -166,6 +171,7 @@ setEnergy() {
 # Function to install software using Homebrew
 softwareInstall() {
   echo "Installing software from Brewfile..."
+  echo "Hinweis: Xcode und Logic Pro im Brewfile sind große Downloads — kann dauern."
   brew bundle --file ~/.dotfiles/Brewfile
 }
 
@@ -179,13 +185,25 @@ cloneAppDaten() {
 manualSoftwareInstall() {
   echo "Starting manual software installation..."
 
-  gum style --foreground 111  'Installing asdf & latest Temurin'
-  mkdir -p ~/.config/fish && touch ~/.config/fish/config.fish
-  grep -q 'asdf.fish' ~/.config/fish/config.fish || (gum style --foreground 210 'Add asdf-config to fish' && echo -e "\nsource "$(brew --prefix asdf)"/libexec/asdf.fish" >> "~/.config/fish/config.fish")
-  gum confirm "Setup latest Java?" && asdf plugin-add java && asdf install java $(asdf list-all java |fzf)
-  gum confirm "Setup latest Node?" && asdf plugin-add nodejs && asdf install nodejs latest
-  askToInstall 'Safari Technology Preview' 'https://developer.apple.com/safari/technology-preview/'
+  gum style --foreground 111 'Setup mise (runtime manager — replaces asdf)'
+  if ! command -v mise >/dev/null 2>&1; then
+    brew install mise
+  fi
+  mkdir -p ~/.config/fish/conf.d && touch ~/.config/fish/config.fish
+  if ! grep -q 'mise activate' ~/.config/fish/config.fish; then
+    gum style --foreground 210 'Add mise-activation to fish'
+    echo -e "\n# mise — runtime manager\nmise activate fish | source" >> ~/.config/fish/config.fish
+  fi
+  gum confirm "Setup latest Java (Temurin)?" && mise use --global java@latest
+  gum confirm "Setup latest Node?" && mise use --global node@latest
+  gum confirm "Setup latest Python?" && mise use --global python@latest
+
   gum style --foreground 190 'Setup Dev folders' && mkdir -p ~/dev/{personal,work,edu} && open ~/dev
+
+  echo ""
+  gum style --foreground 213 --bold 'Backup einrichten?'
+  echo "  Wenn die Backup-Platte 'Backups' angeschlossen ist, hier den Bootstrap starten."
+  gum confirm "Kopia-Backup-Continuity jetzt einrichten?" && bash /Volumes/Backups/RESTORE-HOWTO/bootstrap.sh
 }
 
 # Function to set the default shell
@@ -220,20 +238,22 @@ setDock() {
   gum style --foreground 190 'Update Dock'
 
   declare -a dockItems=(
-    "/Applications/Safari Technology Preview.app"
-    "/Applications/Arc.app"
-    "/Applications/Warp.app"
-    "/Applications/Notion.app"
+    "/Applications/Safari.app"
+    "/Applications/Firefox.app"
+    "/Applications/Ghostty.app"
+    "/Applications/Obsidian.app"
     "/Applications/BusyCal.app"
-    "/System/Applications/Mail.app"
+    "/Applications/ChatGPT.app"
+    "/Applications/Claude.app"
+    "/Applications/Slack.app"
+    "/Applications/Microsoft Outlook.app"
     "/System/Applications/Music.app"
-    "/Users/rubeen/Applications/Fleet.app"
-    "/Users/rubeen/Applications/IntelliJ IDEA Ultimate.app"
+    "/Users/rubeen/Applications/IntelliJ IDEA.app"
   )
 
-  for dockItem in "${dockItems[@]}"; do
-    defaults write com.apple.dock persistent-apps -array-add "$(__dock_item ${dockItem})"
-  done
+for dockItem in "${dockItems[@]}"; do
+  [[ -e "$dockItem" ]] && defaults write com.apple.dock persistent-apps -array-add "$(__dock_item ${dockItem})"
+done
 
   gum style --foreground 190 'Restart the Dock'
   killall Dock
@@ -242,12 +262,62 @@ setDock() {
 setupSymlinks() {
   echo "Setting up Symlinks..."
 
-  mkdir -p ~/.ssh/configs
-  ln -s ~/.dotfiles/ssh/config ~/.ssh/config
-  ln -s ~/.dotfiles/git/.gitconfig ~/.gitconfig
-  ln -s ~/.dotfiles/testcontainers.properties ~/.testcontainers.properties
-  ln -s ~/.dotfiles/fish ~/.config/
-  ln -s ~/.dotfiles/vimrc ~/.vimrc
+  mkdir -p ~/.ssh/configs ~/.config
+
+  # link: idempotent + sicher
+  #   - missing source → skip
+  #   - existing symlink → atomic replace (ln -sfn)
+  #   - existing file/dir → backup, dann symlink (verhindert Datenverlust bei Re-Run)
+  link() {
+    local src="$1" dst="$2"
+    if [ ! -e "$src" ]; then
+      gum style --foreground 196 "  skip: source missing — $src"
+      return
+    fi
+    if [ -L "$dst" ]; then
+      ln -sfn "$src" "$dst"
+      gum style --foreground 040 "  ✓ $dst → $src"
+    elif [ -e "$dst" ]; then
+      local backup="${dst}.backup-$(date +%Y%m%d-%H%M%S)"
+      mv "$dst" "$backup"
+      ln -sfn "$src" "$dst"
+      gum style --foreground 040 "  ✓ $dst → $src  (alte Version: $backup)"
+    else
+      mkdir -p "$(dirname "$dst")"
+      ln -sfn "$src" "$dst"
+      gum style --foreground 040 "  ✓ $dst → $src"
+    fi
+  }
+
+  # Shell + Git + SSH
+  link ~/.dotfiles/ssh/config             ~/.ssh/config
+  link ~/.dotfiles/git/.gitconfig         ~/.gitconfig
+  link ~/.dotfiles/testcontainers.properties ~/.testcontainers.properties
+  link ~/.dotfiles/fish                   ~/.config/fish
+
+  # Prompt + Terminal-Tools
+  link ~/.dotfiles/starship.toml          ~/.config/starship.toml
+  link ~/.dotfiles/ghostty                ~/.config/ghostty
+  link ~/.dotfiles/atuin                  ~/.config/atuin
+  link ~/.dotfiles/btop                   ~/.config/btop
+  link ~/.dotfiles/topgrade.toml          ~/.config/topgrade.toml
+
+  # Dev/CLI
+  link ~/.dotfiles/jj                     ~/.config/jj
+  link ~/.dotfiles/fabric                 ~/.config/fabric
+
+  # Window/Status (yabai/skhd-Stil — falls genutzt)
+  link ~/.dotfiles/sketchybar             ~/.config/sketchybar
+  link ~/.dotfiles/skhd                   ~/.config/skhd
+
+  # Raycast / Docker
+  link ~/.dotfiles/raycast                ~/.config/raycast
+  link ~/.dotfiles/docker/canary.json     ~/.docker/canary.json
+
+  # r-tools (eigene Skripte): Symlink zur stabilen Location.
+  # PATH wird in fish/config.fish via `fish_add_path $HOME/.dotfiles/r-tools` gesetzt
+  # (funktioniert auch ohne Symlink — der Symlink ist Konsistenz-Halber dabei).
+  link ~/.dotfiles/r-tools                ~/.local/share/r-tools
 }
 
 # Executing functions

@@ -1,0 +1,420 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# imgresize - Resize images to exact width/height in pixels
+
+usage() {
+    cat <<'EOF'
+imgresize - Resize an image to exact width/height in pixels
+
+Usage:
+  imgresize [input-file] [width-px height-px|widthxheight|single-size [square]] [output-file]
+  imgresize -i <input-file> -x <width-px> -y <height-px> [-o <output-file>]
+  imgresize -i <input-file> -x <width-px> [-y <height-px>] [--square]
+  imgresize --square <input-file> <single-size> [output-file]
+  imgresize -h | --help
+
+Examples:
+  imgresize photo.jpg 1200 800
+  imgresize photo.jpg 1200x800
+  imgresize photo.jpg 512 square
+  imgresize -i photo.png -x 512 -y 512 -o avatar.png
+
+Notes:
+  If no output file is given, this file is created:
+  <input-name>-<width>x<height>.<ext>
+  If arguments are missing and gum is available, interactive prompts are shown.
+EOF
+}
+
+fail() {
+    echo "Error: $*" >&2
+    exit 1
+}
+
+require_value() {
+    local opt="$1"
+    local value="${2-}"
+    [[ -n "$value" ]] || fail "Option $opt requires a value."
+}
+
+is_positive_int() {
+    [[ "$1" =~ ^[1-9][0-9]*$ ]]
+}
+
+is_square_keyword() {
+    case "$1" in
+        square|sq|quadrat|q)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+can_use_gum_prompt() {
+    [[ -t 0 && -t 1 ]] && command -v gum >/dev/null 2>&1
+}
+
+parse_size_spec() {
+    local value="$1"
+    if [[ "$value" =~ ^([1-9][0-9]*)x([1-9][0-9]*)$ ]]; then
+        printf '%s\t%s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+        return 0
+    fi
+    return 1
+}
+
+scale_dimension() {
+    local value="$1" percent="$2"
+    local result
+    result=$(( (value * percent + 50) / 100 ))
+    (( result < 1 )) && result=1
+    echo "$result"
+}
+
+aspect_height_for_width() {
+    local target_width="$1" original_width="$2" original_height="$3"
+    local result
+    result=$(( (original_height * target_width + original_width / 2) / original_width ))
+    (( result < 1 )) && result=1
+    echo "$result"
+}
+
+aspect_width_for_height() {
+    local target_height="$1" original_width="$2" original_height="$3"
+    local result
+    result=$(( (original_width * target_height + original_height / 2) / original_height ))
+    (( result < 1 )) && result=1
+    echo "$result"
+}
+
+list_image_files() {
+    local files=""
+
+    if command -v rg >/dev/null 2>&1; then
+        files="$(
+            rg --files \
+                -g '*.jpg' -g '*.jpeg' -g '*.png' -g '*.webp' -g '*.gif' \
+                -g '*.tif' -g '*.tiff' -g '*.bmp' -g '*.heic' -g '*.avif' \
+                -g '*.JPG' -g '*.JPEG' -g '*.PNG' -g '*.WEBP' -g '*.GIF' \
+                -g '*.TIF' -g '*.TIFF' -g '*.BMP' -g '*.HEIC' -g '*.AVIF' \
+                2>/dev/null || true
+        )"
+    fi
+
+    if [[ -z "$files" ]]; then
+        files="$(
+            find . -type f \
+                \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' -o -iname '*.gif' \
+                -o -iname '*.tif' -o -iname '*.tiff' -o -iname '*.bmp' -o -iname '*.heic' -o -iname '*.avif' \) \
+                -print 2>/dev/null | sed 's|^\./||' || true
+        )"
+    fi
+
+    printf '%s\n' "$files"
+}
+
+pick_input_with_gum() {
+    local files picked
+    files="$(list_image_files | sed '/^$/d')"
+    picked=""
+
+    if [[ -n "$files" ]]; then
+        picked="$(printf '%s\n' "$files" | gum filter --header "Select input image (from current path)" --placeholder "Type to filter files..." || true)"
+    fi
+
+    if [[ -n "$picked" ]]; then
+        echo "$picked"
+        return 0
+    fi
+
+    gum input --header "Input image file" --placeholder "/path/to/image.jpg" || true
+}
+
+get_image_dimensions() {
+    local input="$1" image_width image_height
+    image_width="$(sips -g pixelWidth "$input" 2>/dev/null | awk '/pixelWidth/ { print $2; exit }')"
+    image_height="$(sips -g pixelHeight "$input" 2>/dev/null | awk '/pixelHeight/ { print $2; exit }')"
+    [[ -n "$image_width" && -n "$image_height" ]] || fail "Could not read image size: $input"
+    printf '%s\t%s\n' "$image_width" "$image_height"
+}
+
+prompt_size_with_presets() {
+    local original_width="$1" original_height="$2"
+    local w75 h75 w50 h50 w25 h25 choice prompt_width prompt_height
+
+    w75="$(scale_dimension "$original_width" 75)"
+    h75="$(scale_dimension "$original_height" 75)"
+    w50="$(scale_dimension "$original_width" 50)"
+    h50="$(scale_dimension "$original_height" 50)"
+    w25="$(scale_dimension "$original_width" 25)"
+    h25="$(scale_dimension "$original_height" 25)"
+
+    choice="$(
+        gum choose --header "Original size: ${original_width}x${original_height}" \
+            "75% (${w75}x${h75})" \
+            "50% (${w50}x${h50})" \
+            "25% (${w25}x${h25})" \
+            "Custom" || true
+    )"
+
+    case "$choice" in
+        "75%"*)
+            prompt_width="$w75"
+            prompt_height="$h75"
+            ;;
+        "50%"*)
+            prompt_width="$w50"
+            prompt_height="$h50"
+            ;;
+        "25%"*)
+            prompt_width="$w25"
+            prompt_height="$h25"
+            ;;
+        *)
+            prompt_width="$(gum input --header "Width (px)" --value "$original_width" --placeholder "$original_width" || true)"
+            prompt_height="$(gum input --header "Height (px)" --value "$original_height" --placeholder "$original_height" || true)"
+            ;;
+    esac
+
+    printf '%s\t%s\n' "$prompt_width" "$prompt_height"
+}
+
+prompt_missing_height() {
+    local width="$1" original_width="$2" original_height="$3" suggested_height
+    suggested_height="$(aspect_height_for_width "$width" "$original_width" "$original_height")"
+    gum input --header "Height (px)" --value "$suggested_height" --placeholder "$suggested_height" || true
+}
+
+prompt_missing_width() {
+    local height="$1" original_width="$2" original_height="$3" suggested_width
+    suggested_width="$(aspect_width_for_height "$height" "$original_width" "$original_height")"
+    gum input --header "Width (px)" --value "$suggested_width" --placeholder "$suggested_width" || true
+}
+
+prompt_single_size_meaning() {
+    local single_size="$1" original_width="$2" original_height="$3"
+    local auto_height auto_width choice resolved_width resolved_height
+
+    auto_height="$(aspect_height_for_width "$single_size" "$original_width" "$original_height")"
+    auto_width="$(aspect_width_for_height "$single_size" "$original_width" "$original_height")"
+
+    choice="$(
+        gum choose --header "Single value: ${single_size}px - what do you mean?" \
+            "Square (${single_size}x${single_size})" \
+            "Width ${single_size}px (auto height ${auto_height}px)" \
+            "Height ${single_size}px (auto width ${auto_width}px)" \
+            "Custom" || true
+    )"
+
+    case "$choice" in
+        "Square "*)
+            resolved_width="$single_size"
+            resolved_height="$single_size"
+            ;;
+        "Width "*)
+            resolved_width="$single_size"
+            resolved_height="$auto_height"
+            ;;
+        "Height "*)
+            resolved_width="$auto_width"
+            resolved_height="$single_size"
+            ;;
+        *)
+            resolved_width="$(gum input --header "Width (px)" --value "$single_size" --placeholder "$original_width" || true)"
+            resolved_height="$(gum input --header "Height (px)" --value "$auto_height" --placeholder "$original_height" || true)"
+            ;;
+    esac
+
+    printf '%s\t%s\n' "$resolved_width" "$resolved_height"
+}
+
+default_output_path() {
+    local input="$1" width="$2" height="$3"
+    local dir base stem ext
+
+    dir="$(dirname "$input")"
+    base="$(basename "$input")"
+    stem="${base%.*}"
+
+    if [[ "$base" == "$stem" ]]; then
+        echo "$dir/${base}-${width}x${height}"
+        return
+    fi
+
+    ext="${base##*.}"
+    echo "$dir/${stem}-${width}x${height}.${ext}"
+}
+
+main() {
+    local input="" width="" height="" output="" single_size=""
+    local square_hint=false
+    local current_width="" current_height=""
+    local -a positional=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)
+                usage
+                return 0
+                ;;
+            -i|--input)
+                require_value "$1" "${2-}"
+                input="$2"
+                shift 2
+                ;;
+            -x|--width)
+                require_value "$1" "${2-}"
+                width="$2"
+                shift 2
+                ;;
+            -y|--height)
+                require_value "$1" "${2-}"
+                height="$2"
+                shift 2
+                ;;
+            -o|--output)
+                require_value "$1" "${2-}"
+                output="$2"
+                shift 2
+                ;;
+            --square|--sq)
+                square_hint=true
+                shift
+                ;;
+            --)
+                shift
+                while [[ $# -gt 0 ]]; do
+                    positional+=("$1")
+                    shift
+                done
+                ;;
+            square|sq|quadrat|q)
+                square_hint=true
+                shift
+                ;;
+            -*)
+                fail "Unknown option: $1"
+                ;;
+            *)
+                positional+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$input" && ${#positional[@]} -gt 0 ]]; then
+        input="${positional[0]}"
+        positional=("${positional[@]:1}")
+    fi
+
+    if [[ -z "$width" && -z "$height" && ${#positional[@]} -gt 0 ]]; then
+        local size_spec
+        size_spec="$(parse_size_spec "${positional[0]}" || true)"
+        if [[ -n "$size_spec" ]]; then
+            IFS=$'\t' read -r width height <<<"$size_spec"
+            positional=("${positional[@]:1}")
+        elif [[ ${#positional[@]} -ge 2 ]] && is_positive_int "${positional[0]}" && is_positive_int "${positional[1]}"; then
+            width="${positional[0]}"
+            height="${positional[1]}"
+            positional=("${positional[@]:2}")
+        elif is_positive_int "${positional[0]}"; then
+            single_size="${positional[0]}"
+            positional=("${positional[@]:1}")
+        fi
+    fi
+
+    if [[ -n "$single_size" && ${#positional[@]} -gt 0 ]] && is_square_keyword "${positional[0]}"; then
+        square_hint=true
+        positional=("${positional[@]:1}")
+    fi
+
+    if [[ -z "$width" && ${#positional[@]} -gt 0 ]] && is_positive_int "${positional[0]}"; then
+        width="${positional[0]}"
+        positional=("${positional[@]:1}")
+    fi
+
+    if [[ -z "$height" && ${#positional[@]} -gt 0 ]] && is_positive_int "${positional[0]}"; then
+        height="${positional[0]}"
+        positional=("${positional[@]:1}")
+    fi
+
+    if [[ -z "$output" && ${#positional[@]} -gt 0 ]]; then
+        output="${positional[0]}"
+        positional=("${positional[@]:1}")
+    fi
+
+    [[ ${#positional[@]} -eq 0 ]] || fail "Too many arguments."
+
+    if [[ -z "$input" ]] && can_use_gum_prompt; then
+        input="$(pick_input_with_gum)"
+    fi
+
+    [[ -n "$input" ]] || fail "Missing input file. Use -i <file>, positional args, or interactive mode."
+    [[ -f "$input" ]] || fail "Input file not found: $input"
+    command -v sips >/dev/null 2>&1 || fail "'sips' is required on macOS."
+
+    local dimensions
+    dimensions="$(get_image_dimensions "$input")"
+    IFS=$'\t' read -r current_width current_height <<<"$dimensions"
+
+    if [[ -n "$single_size" && ( -z "$width" || -z "$height" ) ]]; then
+        if $square_hint; then
+            width="$single_size"
+            height="$single_size"
+        elif can_use_gum_prompt; then
+            local resolved
+            resolved="$(prompt_single_size_meaning "$single_size" "$current_width" "$current_height")"
+            IFS=$'\t' read -r width height <<<"$resolved"
+        else
+            fail "Single size is ambiguous. Use '<width> <height>' or add 'square'."
+        fi
+    fi
+
+    if $square_hint; then
+        if [[ -n "$width" && -z "$height" ]]; then
+            height="$width"
+        elif [[ -z "$width" && -n "$height" ]]; then
+            width="$height"
+        fi
+    fi
+
+    if [[ -z "$width" && -z "$height" ]] && can_use_gum_prompt; then
+        local preset_values
+        preset_values="$(prompt_size_with_presets "$current_width" "$current_height")"
+        IFS=$'\t' read -r width height <<<"$preset_values"
+    fi
+
+    if [[ -n "$width" && -z "$height" ]] && can_use_gum_prompt; then
+        height="$(prompt_missing_height "$width" "$current_width" "$current_height")"
+    fi
+
+    if [[ -z "$width" && -n "$height" ]] && can_use_gum_prompt; then
+        width="$(prompt_missing_width "$height" "$current_width" "$current_height")"
+    fi
+
+    if [[ -z "$width" || -z "$height" ]]; then
+        if can_use_gum_prompt; then
+            [[ -n "$width" ]] || width="$(gum input --header "Width (px)" --placeholder "$current_width" --value "$current_width" || true)"
+            [[ -n "$height" ]] || height="$(gum input --header "Height (px)" --placeholder "$current_height" --value "$current_height" || true)"
+        fi
+    fi
+
+    [[ -n "$width" ]] || fail "Missing width. Use -x <px>, positional args, or interactive mode."
+    [[ -n "$height" ]] || fail "Missing height. Use -y <px>, positional args, or interactive mode."
+    is_positive_int "$width" || fail "Width must be a positive integer (px)."
+    is_positive_int "$height" || fail "Height must be a positive integer (px)."
+
+    if [[ -z "$output" ]]; then
+        output="$(default_output_path "$input" "$width" "$height")"
+    fi
+
+    # sips expects: --resampleHeightWidth <height> <width>
+    sips --resampleHeightWidth "$height" "$width" "$input" --out "$output" >/dev/null
+
+    echo "Resized image written to: $output"
+}
+
+main "$@"

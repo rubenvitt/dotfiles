@@ -1,0 +1,21 @@
+font-family = "PT Mono"
+#theme = "dark:Argonaut,light:GitHub Light Default"
+theme = "dark:catppuccin-mocha.conf,light:catppuccin-latte.conf"
+#theme = "ayu"
+#theme = "Highway"
+#theme = "catppuccin-mocha.conf"
+#theme = "Argonaut"
+selection-background = "#ffa500"
+selection-foreground = "#ffffff"
+cursor-color = "#ffa500"
+window-colorspace = "display-p3"
+macos-titlebar-style = "transparent"
+window-padding-x = 10
+window-padding-y = 10,10
+keybind = global:cmd+option+ö=toggle_quick_terminal
+keybind = shift+enter=text:\n
+background-opacity = 0.98
+background-blur = 200
+scrollback-limit = 52428800
+link-previews = true
+link-url = true

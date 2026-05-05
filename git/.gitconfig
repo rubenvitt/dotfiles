@@ -1,7 +1,7 @@
 [include]
 	path = ~/.config/git/base.gitconfig
 
-[includeIf "gitdir:~/dev/work/"]
+[includeIf "gitdir:~/dev/work/**"]
 	path = ~/.config/git/work.gitconfig
 [includeIf "gitdir:~/.dotfiles/"]
         path = ~/.config/git/personal.gitconfig
@@ -11,6 +11,8 @@
         path = ~/.config/git/personal.gitconfig
 [includeIf "gitdir:~/dev/dearinnovation/"]
         path = ~/.config/git/dearinnovation.gitconfig
+[includeIf "gitdir:~.codex/worktrees/"]
+		path = ~/.config/git/personal.gitconfig
 [core]
 	autocrlf = input
 [commit]
@@ -46,7 +48,7 @@
 [credential]
 	helper = osxkeychain
 [clone]
-	defaultRemoteName = git
+	defaultRemoteName = origin
 [user]
 	name = Ruben Vitt
 [filter "lfs"]
@@ -56,3 +58,5 @@
 	required = true
 [maintenance]
 	repo = /Users/rubeen/.zsh/plugins/zsh-autocomplete
+[advice]
+	addIgnoredFile = false

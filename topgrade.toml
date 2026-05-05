@@ -16,12 +16,13 @@
 
 # Disable specific steps - same options as the command line flag
 # disable = ["system", "emacs"]
+disable = ["asdf", "uv"]
 
 # Ignore failures for these steps
 # ignore_failures = ["powershell"]
 
 # List of remote machines with Topgrade installed on them
-# remote_topgrades = ["toothless", "pi", "parnas"]
+remote_topgrades = ["iuk-services"]
 
 # Path to Topgrade executable on remote machines
 # remote_topgrade_path = ".cargo/bin/topgrade"

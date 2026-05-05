@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# batc - Datei mit bat anzeigen und Inhalt in die Zwischenablage kopieren
+
+usage() {
+	cat <<-EOF
+		Usage: batc <file> [bat-options...]
+
+		Zeigt eine Datei mit 'bat' an und kopiert den Inhalt
+		gleichzeitig mit 'cat | pbcopy' in die Zwischenablage.
+
+		Options:
+		  -h, --help    Hilfe anzeigen
+
+		Alle weiteren Argumente werden an 'bat' weitergegeben.
+	EOF
+}
+
+main() {
+	if [[ $# -eq 0 ]] || [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]]; then
+		usage
+		exit 0
+	fi
+
+	local file="$1"
+	shift
+
+	if [[ ! -f "$file" ]]; then
+		echo "Fehler: '$file' nicht gefunden oder keine reguläre Datei." >&2
+		exit 1
+	fi
+
+	cat "$file" | pbcopy
+	bat "$@" "$file"
+	echo "✓ Inhalt in die Zwischenablage kopiert."
+}
+
+main "$@"

@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# to-txt - EPUB- oder PDF-Datei in Klartext (.txt) konvertieren
+
+usage() {
+    cat <<'EOF'
+to-txt - EPUB- oder PDF-Datei in Klartext konvertieren
+
+Usage:
+  to-txt <input.(epub|pdf)> [output.txt]
+  to-txt -i                       Interaktive Auswahl (gum)
+  to-txt <input> -                Ausgabe nach stdout
+  to-txt -h | --help
+
+Optionen:
+  -o, --output <file>   Zieldatei (Default: <input>.txt neben der Quelle)
+  -c, --clipboard       Inhalt zusätzlich in die Zwischenablage kopieren
+  -s, --stdout          Ausgabe nach stdout statt in Datei
+  -i, --interactive     Datei per gum auswählen
+  -L, --layout          PDF: physisches Layout beibehalten (Spalten, Tabellen)
+  -h, --help            Diese Hilfe anzeigen
+
+Hinweise:
+  Wird kein Output angegeben, entsteht <input-name>.txt im selben Ordner.
+  Format wird per Dateiendung erkannt (.epub, .pdf).
+  Benötigt 'pandoc' für EPUB (brew install pandoc),
+  'pdftotext' für PDF (brew install poppler).
+EOF
+}
+
+fail() {
+    echo "Fehler: $*" >&2
+    exit 1
+}
+
+can_use_gum_prompt() {
+    [[ -t 0 && -t 1 ]] && command -v gum >/dev/null 2>&1
+}
+
+list_input_files() {
+    if command -v rg >/dev/null 2>&1; then
+        rg --files -g '*.epub' -g '*.EPUB' -g '*.pdf' -g '*.PDF' 2>/dev/null || true
+    else
+        find . -type f \( -iname '*.epub' -o -iname '*.pdf' \) -print 2>/dev/null | sed 's|^\./||' || true
+    fi
+}
+
+pick_input_with_gum() {
+    local files picked
+    files="$(list_input_files | sed '/^$/d')"
+
+    if [[ -n "$files" ]]; then
+        picked="$(printf '%s\n' "$files" | gum filter --header "EPUB/PDF auswählen" --placeholder "Tippen zum Filtern..." || true)"
+        [[ -n "$picked" ]] && { echo "$picked"; return; }
+    fi
+
+    gum input --header "Pfad zur EPUB- oder PDF-Datei" --placeholder "/pfad/zu/datei.pdf" || true
+}
+
+default_output_path() {
+    local input="$1" dir base stem
+    dir="$(dirname "$input")"
+    base="$(basename "$input")"
+    stem="${base%.*}"
+    [[ "$base" == "$stem" ]] && stem="$base"
+    echo "$dir/${stem}.txt"
+}
+
+detect_format() {
+    local input="$1" ext
+    ext="${input##*.}"
+    case "${ext,,}" in
+        epub) echo "epub" ;;
+        pdf)  echo "pdf"  ;;
+        *)    return 1 ;;
+    esac
+}
+
+extract_text() {
+    local format="$1" input="$2" layout="$3"
+    case "$format" in
+        epub)
+            command -v pandoc >/dev/null 2>&1 || fail "'pandoc' wird benötigt (brew install pandoc)."
+            pandoc -f epub -t plain --wrap=none "$input"
+            ;;
+        pdf)
+            command -v pdftotext >/dev/null 2>&1 || fail "'pdftotext' wird benötigt (brew install poppler)."
+            local -a args=(-nopgbrk)
+            $layout && args+=(-layout)
+            pdftotext "${args[@]}" "$input" -
+            ;;
+    esac
+}
+
+main() {
+    local input="" output="" clipboard=false to_stdout=false interactive=false layout=false
+    local -a positional=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)        usage; return 0 ;;
+            -o|--output)      output="${2:?Option $1 braucht einen Wert}"; shift 2 ;;
+            -c|--clipboard)   clipboard=true; shift ;;
+            -s|--stdout)      to_stdout=true; shift ;;
+            -i|--interactive) interactive=true; shift ;;
+            -L|--layout)      layout=true; shift ;;
+            --)               shift; while [[ $# -gt 0 ]]; do positional+=("$1"); shift; done ;;
+            -)                positional+=("$1"); shift ;;
+            -*)               fail "Unbekannte Option: $1" ;;
+            *)                positional+=("$1"); shift ;;
+        esac
+    done
+
+    if [[ ${#positional[@]} -gt 0 ]]; then
+        input="${positional[0]}"
+    fi
+    if [[ -z "$output" && ${#positional[@]} -ge 2 ]]; then
+        output="${positional[1]}"
+    fi
+    [[ ${#positional[@]} -le 2 ]] || fail "Zu viele Argumente."
+
+    if [[ -z "$input" ]] && { $interactive || can_use_gum_prompt; }; then
+        input="$(pick_input_with_gum)"
+    fi
+
+    [[ -n "$input" ]] || fail "Keine Datei angegeben. Nutze <input.epub|pdf>, -i oder --help."
+    [[ -f "$input" ]] || fail "Datei nicht gefunden: $input"
+
+    local format
+    format="$(detect_format "$input")" || fail "Unbekanntes Format (erwartet .epub oder .pdf): $input"
+
+    if [[ "$output" == "-" ]]; then
+        to_stdout=true
+        output=""
+    fi
+
+    if $to_stdout; then
+        local text
+        text="$(extract_text "$format" "$input" "$layout")"
+        printf '%s\n' "$text"
+        $clipboard && printf '%s' "$text" | pbcopy && echo "✓ Inhalt in die Zwischenablage kopiert." >&2
+        return
+    fi
+
+    [[ -n "$output" ]] || output="$(default_output_path "$input")"
+
+    extract_text "$format" "$input" "$layout" > "$output"
+    echo "✓ Geschrieben: $output"
+
+    if $clipboard; then
+        pbcopy < "$output"
+        echo "✓ Inhalt in die Zwischenablage kopiert."
+    fi
+}
+
+main "$@"

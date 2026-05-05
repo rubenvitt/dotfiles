@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
+SELF="$(basename "$0")"
+
+get_tools() {
+    for f in "$TOOLS_DIR"/*; do
+        [[ -x "$f" && -f "$f" ]] || continue
+        local name
+        name=$(basename "$f")
+        [[ "$name" == "$SELF" ]] && continue
+        echo "$name"
+    done
+}
+
+get_description() {
+    local tool="$TOOLS_DIR/$1"
+    # Try comment line like "# tool - Description"
+    local desc
+    desc=$(sed -n 's/^# *'"$1"' - \(.*\)/\1/p' "$tool" | head -1 || true)
+    if [[ -n "$desc" ]]; then echo "$desc"; return; fi
+    # Try usage function output: "tool - Description"
+    desc=$(grep -m1 "^$1 - " "$tool" | sed "s/^$1 - //" || true)
+    if [[ -n "$desc" ]]; then echo "$desc"; return; fi
+    # Fallback: first meaningful comment
+    sed -n 's/^# *\(.*\)/\1/p' "$tool" | grep -iv 'usr/bin\|set -\|shellcheck\|usage:' | head -1 || true
+}
+
+show_help() {
+    local tool="$TOOLS_DIR/$1"
+    local help
+    help=$("$tool" --help 2>/dev/null) && [[ -n "$help" ]] && { echo "$help"; return; }
+    help=$("$tool" -h 2>/dev/null) && [[ -n "$help" ]] && { echo "$help"; return; }
+    # Fallback: extract comment block from file header
+    sed -n '/^#!/d; /^set /d; /^$/d; s/^# *//p' "$tool" | head -10
+}
+
+list_tools() {
+    local tools
+    mapfile -t tools < <(get_tools)
+
+    if [[ ${#tools[@]} -eq 0 ]]; then
+        echo "No tools found in $TOOLS_DIR"
+        return
+    fi
+
+    printf "\033[1mr-tools\033[0m\n\n"
+    for t in "${tools[@]}"; do
+        local desc
+        desc=$(get_description "$t")
+        printf "  \033[36m%-12s\033[0m %s\n" "$t" "$desc"
+    done
+    echo
+}
+
+interactive() {
+    command -v gum &>/dev/null || {
+        echo "gum required (brew install gum)" >&2
+        exit 1
+    }
+
+    local tools
+    mapfile -t tools < <(get_tools)
+
+    if [[ ${#tools[@]} -eq 0 ]]; then
+        echo "No tools found"
+        return
+    fi
+
+    # Build display items with descriptions
+    local items=()
+    for t in "${tools[@]}"; do
+        local desc
+        desc=$(get_description "$t")
+        items+=("$t  ·  $desc")
+    done
+
+    local choice
+    choice=$(printf '%s\n' "${items[@]}" | gum choose --header "r-tools  ─  Pick a tool for help")
+    [[ -z "$choice" ]] && return
+
+    # Extract tool name (first word)
+    local tool_name
+    tool_name=$(awk '{print $1}' <<<"$choice")
+
+    echo
+    gum style --border rounded --padding "0 1" --border-foreground 6 "$(show_help "$tool_name")"
+
+    echo
+    if gum confirm "Run $tool_name --help again?"; then
+        show_help "$tool_name"
+    fi
+}
+
+case "${1:-}" in
+    -h|--help)
+        cat <<'EOF'
+r-tools - Overview of all r-tools
+
+Usage:
+  r-tools           Interactive tool picker (gum)
+  r-tools -l        List all tools
+  r-tools <tool>    Show help for a specific tool
+  r-tools -h        Show this help
+EOF
+        ;;
+    -l|--list)
+        list_tools
+        ;;
+    "")
+        interactive
+        ;;
+    *)
+        if [[ -x "$TOOLS_DIR/$1" && -f "$TOOLS_DIR/$1" ]]; then
+            show_help "$1"
+        else
+            echo "Unknown tool: $1" >&2
+            exit 1
+        fi
+        ;;
+esac

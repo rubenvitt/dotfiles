@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DEFAULT_LENGTH=20
+DEFAULT_TIMEOUT=45
+
+usage() {
+    cat <<'EOF'
+pw - Secure password generator
+
+Usage:
+  pw                 Generate password (20 chars, all types)
+  pw [length]        Generate with custom length
+  pw -i              Interactive mode (gum)
+
+Options:
+  -l, --length  N    Password length (default: 20)
+  -t, --timeout N    Clipboard auto-clear seconds (default: 45)
+  -s, --simple       Letters + digits only (no symbols)
+  -p, --print        Also print password to stdout
+  -i, --interactive  Interactive mode with gum
+  -h, --help         Show this help
+EOF
+}
+
+copy_concealed() {
+    PW_TEMP="$1" osascript -l JavaScript -e '
+        ObjC.import("AppKit");
+        var pw  = $.NSProcessInfo.processInfo.environment.objectForKey("PW_TEMP").js;
+        var pb  = $.NSPasteboard.generalPasteboard;
+        pb.clearContents;
+        pb.setStringForType(pw, $.NSPasteboardTypeString);
+        var ct  = $.NSString.alloc.initWithString("org.nspasteboard.ConcealedType");
+        pb.setDataForType($.NSData.data, ct);
+    ' &>/dev/null
+}
+
+schedule_clear() {
+    (
+        sleep "$1"
+        osascript -l JavaScript -e '
+            ObjC.import("AppKit");
+            $.NSPasteboard.generalPasteboard.clearContents;
+        ' &>/dev/null
+    ) &
+    disown
+}
+
+generate() {
+    local length=$1 charset=$2
+    shift 2
+    local required=("$@")
+    local pw
+    for ((i = 0; i < 100; i++)); do
+        pw=$(LC_ALL=C tr -dc "$charset" </dev/urandom | head -c "$length" || true)
+        local ok=true
+        for req in "${required[@]}"; do
+            if [[ -z $(LC_ALL=C tr -dc "$req" <<<"$pw" || true) ]]; then
+                ok=false; break
+            fi
+        done
+        $ok && break
+    done
+    printf '%s' "$pw"
+}
+
+run_generate() {
+    local length=$1 timeout=$2 symbols=$3 show=$4
+
+    local charset='A-Za-z0-9' required=('A-Z' 'a-z' '0-9')
+    if $symbols; then
+        charset+='!@#$%^&*_+=-'
+        required+=('!@#$%^&*_+=-')
+    fi
+
+    local pw
+    pw=$(generate "$length" "$charset" "${required[@]}")
+    copy_concealed "$pw"
+    schedule_clear "$timeout"
+
+    $show && echo "$pw"
+    echo "Copied (concealed) -- clears in ${timeout}s"
+}
+
+interactive_mode() {
+    command -v gum &>/dev/null || {
+        echo "gum required (brew install gum)" >&2; return 1
+    }
+
+    local preset
+    preset=$(gum choose --header "Password" \
+        "Standard (20)"  \
+        "Long (32)"      \
+        "Pin (6 digits)" \
+        "Custom")
+
+    local length=$DEFAULT_LENGTH symbols=true show=false
+
+    case "$preset" in
+        "Standard (20)")  length=20 ;;
+        "Long (32)")      length=32 ;;
+        "Pin (6 digits)") length=6; symbols=false ;;
+        "Custom")
+            length=$(gum input --value "$DEFAULT_LENGTH" --header "Length")
+            gum confirm --default=false "Without symbols?" && symbols=false || true
+            ;;
+    esac
+
+    gum confirm --default=false "Show in terminal?" && show=true || true
+
+    run_generate "$length" "$DEFAULT_TIMEOUT" "$symbols" "$show"
+}
+
+main() {
+    local length=$DEFAULT_LENGTH timeout=$DEFAULT_TIMEOUT
+    local symbols=true show=false
+
+    if [[ $# -eq 0 ]]; then
+        run_generate "$length" "$timeout" "$symbols" "$show"
+        return
+    fi
+
+    if [[ $# -eq 1 && "$1" =~ ^[0-9]+$ ]]; then
+        run_generate "$1" "$timeout" "$symbols" "$show"
+        return
+    fi
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -l|--length)      length=$2;      shift 2 ;;
+            -t|--timeout)     timeout=$2;     shift 2 ;;
+            -s|--simple)      symbols=false;  shift ;;
+            -p|--print)       show=true;      shift ;;
+            -i|--interactive) interactive_mode; return ;;
+            -h|--help)        usage; return 0 ;;
+            [0-9]*)           length=$1;      shift ;;
+            *)                echo "Unknown: $1" >&2; usage; return 1 ;;
+        esac
+    done
+
+    run_generate "$length" "$timeout" "$symbols" "$show"
+}
+
+main "$@"

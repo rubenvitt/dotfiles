@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# rnd - Random string generator
+# Usage: rnd [length] [hex|base64|alnum]
+
+length="${1:-64}"
+mode="${2:-alnum}"
+
+case "$mode" in
+    hex)    str=$(openssl rand -hex $(( (length + 1) / 2 )) | head -c "$length") ;;
+    base64) str=$(openssl rand -base64 $(( (length * 3 + 3) / 4 )) | tr -d '=/+\n' | head -c "$length") ;;
+    alnum)  str=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$length" || true) ;;
+    *)      echo "Usage: rnd [length] [hex|base64|alnum]" >&2; exit 1 ;;
+esac
+
+printf '%s' "$str" | pbcopy
+echo "$str"

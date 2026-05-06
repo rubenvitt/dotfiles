@@ -34,6 +34,3 @@ mise activate | source
 function shopt
     return 0
 end
-
-# Mole shell completion
-set -l output (mole completion fish 2>/dev/null); and echo "$output" | source

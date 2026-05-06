@@ -318,6 +318,9 @@ setupSymlinks() {
   # PATH wird in fish/config.fish via `fish_add_path $HOME/.dotfiles/r-tools` gesetzt
   # (funktioniert auch ohne Symlink — der Symlink ist Konsistenz-Halber dabei).
   link ~/.dotfiles/r-tools                ~/.local/share/r-tools
+
+  # LaunchAgents (das Plist verweist intern auf den Skript-Pfad in ~/.dotfiles/launchd)
+  link ~/.dotfiles/launchd/dev.rubeen.kopia.snapshot.plist  ~/Library/LaunchAgents/dev.rubeen.kopia.snapshot.plist
 }
 
 # Executing functions

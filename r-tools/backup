@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# backup - Kopia backup wrapper (snapshot, mount, restore, find)
+# usage: backup <command> [args]
+set -euo pipefail
+
+REPO_PATH="${BACKUP_REPO_PATH:-/Volumes/Backups/kopia-r-mac}"
+SOURCE="${BACKUP_SOURCE:-/Users/rubeen}"
+PW_FILE="${BACKUP_PW_FILE:-$HOME/.config/kopia/.password}"
+OP_REF="${BACKUP_OP_REF:-op://Private/2wivl6237r6atg7q3z62h76t5u/password}"
+MOUNT_BASE="${BACKUP_MOUNT_BASE:-/tmp/kopia-mount}"
+LOG_DIR="$HOME/Library/Logs/kopia"
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+
+# --- helpers ----------------------------------------------------------------
+
+die() { printf 'backup: %s\n' "$*" >&2; exit 1; }
+info() { printf '\033[36m==>\033[0m %s\n' "$*"; }
+
+load_password() {
+  # already in env? respect it.
+  if [ -n "${KOPIA_PASSWORD:-}" ]; then
+    return 0
+  fi
+  # prefer 1Password if op is available and a reference is set
+  if [ -n "$OP_REF" ] && command -v op >/dev/null 2>&1; then
+    local pw
+    if pw="$(op read "$OP_REF" 2>/dev/null)" && [ -n "$pw" ]; then
+      export KOPIA_PASSWORD="$pw"
+      return 0
+    fi
+    info "1Password lookup failed (not signed in, or item missing) — falling back to $PW_FILE"
+  fi
+  [ -r "$PW_FILE" ] || die "no password source: \$KOPIA_PASSWORD unset, op unavailable, $PW_FILE not readable"
+  export KOPIA_PASSWORD
+  KOPIA_PASSWORD="$(cat "$PW_FILE")"
+}
+
+ensure_repo_mounted() {
+  [ -d "$REPO_PATH" ] || die "repo path not available: $REPO_PATH (is the disk mounted?)"
+}
+
+ensure_connected() {
+  ensure_repo_mounted
+  load_password
+  if ! kopia repository status >/dev/null 2>&1; then
+    info "repository not connected, connecting to $REPO_PATH"
+    kopia repository connect filesystem --path="$REPO_PATH" >/dev/null
+  fi
+}
+
+resolve_snapshot() {
+  # accept: literal id (k...), "latest", or "latest-N"
+  local arg="${1:-latest}"
+  case "$arg" in
+    latest)
+      kopia snapshot list "$SOURCE" --json 2>/dev/null \
+        | /usr/bin/python3 -c 'import json,sys;d=json.load(sys.stdin);print(d[-1]["rootEntry"]["obj"])'
+      ;;
+    latest-*)
+      local n="${arg#latest-}"
+      kopia snapshot list "$SOURCE" --json 2>/dev/null \
+        | /usr/bin/python3 -c "import json,sys;d=json.load(sys.stdin);print(d[-int('$n')]['rootEntry']['obj'])"
+      ;;
+    k*)
+      printf '%s' "$arg"
+      ;;
+    *)
+      die "cannot resolve snapshot: $arg (use 'latest', 'latest-N', or a kopia id)"
+      ;;
+  esac
+}
+
+# --- commands ---------------------------------------------------------------
+
+cmd_status() {
+  ensure_repo_mounted
+  load_password
+  kopia repository status
+}
+
+cmd_connect() {
+  ensure_repo_mounted
+  load_password
+  kopia repository connect filesystem --path="$REPO_PATH"
+  info "connected"
+}
+
+cmd_disconnect() {
+  kopia repository disconnect
+  info "disconnected"
+}
+
+cmd_snap() {
+  ensure_connected
+  mkdir -p "$LOG_DIR"
+  local target="${1:-$SOURCE}"
+  info "creating snapshot of $target"
+  kopia snapshot create "$target" "${@:2}"
+}
+
+cmd_ls() {
+  ensure_connected
+  if [ "$#" -gt 0 ]; then
+    kopia snapshot list "$@"
+  else
+    kopia snapshot list "$SOURCE"
+  fi
+}
+
+cmd_sources() {
+  ensure_connected
+  kopia snapshot list --all | head -1 || true
+  kopia source list
+}
+
+cmd_mount() {
+  ensure_connected
+  local snap="${1:-all}"
+  local mountpoint="${2:-$MOUNT_BASE}"
+  mkdir -p "$mountpoint"
+  if mount | grep -q " on $mountpoint "; then
+    die "already mounted: $mountpoint (use 'backup umount [$mountpoint]')"
+  fi
+  if [ "$snap" = "all" ]; then
+    info "mounting all snapshots at $mountpoint (Ctrl-C to stop)"
+    kopia mount all "$mountpoint" "${@:3}"
+  else
+    local oid; oid=$(resolve_snapshot "$snap")
+    info "mounting $snap ($oid) at $mountpoint (Ctrl-C to stop)"
+    kopia mount "$oid" "$mountpoint" "${@:3}"
+  fi
+}
+
+cmd_umount() {
+  local mountpoint="${1:-$MOUNT_BASE}"
+  if mount | grep -q " on $mountpoint "; then
+    info "unmounting $mountpoint"
+    umount "$mountpoint" || diskutil unmount "$mountpoint"
+  else
+    info "not mounted: $mountpoint"
+  fi
+}
+
+cmd_restore() {
+  [ "$#" -ge 2 ] || die "usage: backup restore <snapshot|latest|path-in-snap> <target-dir>"
+  ensure_connected
+  local src="$1" target="$2"; shift 2
+  case "$src" in
+    latest|latest-*)
+      src=$(resolve_snapshot "$src")
+      ;;
+  esac
+  info "restoring $src -> $target"
+  kopia snapshot restore "$src" "$target" "$@"
+}
+
+cmd_find() {
+  [ "$#" -ge 1 ] || die "usage: backup find <pattern> [snapshot]"
+  ensure_connected
+  local pattern="$1" snap="${2:-latest}"
+  local oid; oid=$(resolve_snapshot "$snap")
+  info "searching '$pattern' in $snap ($oid)"
+  kopia ls -r "$oid" | grep -i -- "$pattern" || { info "no matches"; return 1; }
+}
+
+cmd_show() {
+  [ "$#" -ge 1 ] || die "usage: backup show <snapshot> [sub-path]"
+  ensure_connected
+  local snap="$1"; shift
+  local oid; oid=$(resolve_snapshot "$snap")
+  if [ "$#" -gt 0 ]; then
+    kopia show "$oid/$1"
+  else
+    kopia ls "$oid"
+  fi
+}
+
+cmd_policy() {
+  ensure_connected
+  kopia policy show "${1:-$SOURCE}"
+}
+
+cmd_maintenance() {
+  ensure_connected
+  kopia maintenance run "$@"
+}
+
+cmd_verify() {
+  ensure_connected
+  kopia snapshot verify "$@"
+}
+
+cmd_help() {
+  cat <<'EOF'
+backup - Kopia backup wrapper
+
+Commands:
+  status                       show repository status (auto-loads password)
+  connect | disconnect         (re)connect or disconnect repository
+  snap [path] [...kopia args]  create snapshot (default: $SOURCE)
+  ls [args]                    list snapshots (default: of $SOURCE)
+  sources                      list snapshot sources
+  mount [snap] [mountpoint]    mount snapshot ('all' = all snaps); default mountpoint: /tmp/kopia-mount
+  umount [mountpoint]          unmount
+  restore <snap> <target>      restore snapshot to target dir
+                               snap can be 'latest', 'latest-N', or a kopia id (k...)
+  find <pattern> [snap]        grep filenames in a snapshot (default: latest)
+  show <snap> [sub-path]       ls / cat inside a snapshot
+  policy [target]              show policy
+  verify [args]                verify snapshots
+  maintenance [args]           run maintenance
+  help                         this help
+
+Password resolution order:
+  1. $KOPIA_PASSWORD (if already exported)
+  2. 1Password via `op read "$BACKUP_OP_REF"` (default: item "Verschlüsselung Backups" in Private; UUID-based ref because op rejects non-ASCII)
+  3. $BACKUP_PW_FILE (fallback plaintext file)
+
+Env overrides:
+  BACKUP_REPO_PATH    (default: /Volumes/Backups/kopia-r-mac)
+  BACKUP_SOURCE       (default: /Users/rubeen)
+  BACKUP_OP_REF       1Password secret reference (set empty to disable)
+  BACKUP_PW_FILE      (default: ~/.config/kopia/.password)
+  BACKUP_MOUNT_BASE   (default: /tmp/kopia-mount)
+
+Examples:
+  backup status
+  backup snap                            # snapshot $HOME
+  backup mount                           # mount 'all' at /tmp/kopia-mount
+  backup mount latest                    # mount newest snapshot
+  backup mount latest /tmp/snap          # custom mountpoint
+  backup umount
+  backup restore latest /tmp/restore
+  backup restore k41af866d.../Documents /tmp/docs
+  backup find "secret.txt"
+EOF
+}
+
+# --- dispatch ---------------------------------------------------------------
+
+cmd="${1:-help}"
+shift || true
+case "$cmd" in
+  status)              cmd_status "$@" ;;
+  connect)             cmd_connect "$@" ;;
+  disconnect)          cmd_disconnect "$@" ;;
+  snap|snapshot)       cmd_snap "$@" ;;
+  ls|list)             cmd_ls "$@" ;;
+  sources)             cmd_sources "$@" ;;
+  mount)               cmd_mount "$@" ;;
+  umount|unmount)      cmd_umount "$@" ;;
+  restore)             cmd_restore "$@" ;;
+  find|search)         cmd_find "$@" ;;
+  show|cat)            cmd_show "$@" ;;
+  policy)              cmd_policy "$@" ;;
+  verify)              cmd_verify "$@" ;;
+  maintenance|maint)   cmd_maintenance "$@" ;;
+  help|-h|--help)      cmd_help ;;
+  *)                   printf 'backup: unknown command: %s\n\n' "$cmd" >&2; cmd_help; exit 2 ;;
+esac

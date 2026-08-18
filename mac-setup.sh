@@ -175,10 +175,13 @@ setKeyboardShortcuts() {
   done
 
   # Native Space-Navigation deaktivieren — AeroSpace übernimmt die Workspaces.
-  #   79 = Move left a space   (Ctrl+Left)
-  #   80 = Move right a space  (Ctrl+Right)
+  # Achtung: pro Richtung gibt es ZWEI Einträge, die zweite ist die
+  # Shift-Variante ("Fenster mitnehmen"). Nur 79/80 zu deaktivieren lässt
+  # den Rechts-Wechsel aktiv:
+  #   79 = Move left a space           80 = Move left a space + Shift
+  #   81 = Move right a space          82 = Move right a space + Shift
   # Ohne das kollidiert jede Ctrl+Alt+Pfeil-Bindung von AeroSpace mit macOS.
-  for id in 79 80; do
+  for id in 79 80 81 82; do
     defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add "$id" \
       '<dict><key>enabled</key><false/></dict>'
   done

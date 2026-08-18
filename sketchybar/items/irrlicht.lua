@@ -32,7 +32,9 @@ local ROW_FONT = 11.0
 -- background.height wirkt nur auf den gezeichneten Hintergrund und ändert am
 -- Zeilenabstand nichts.
 local ROW_HEIGHT = 20
-local ROW_PAD = 0
+-- Randabstand der Zeilen zum Popup-Rahmen. Wirkt links wie rechts, weil
+-- Icon-Polster und Label-Polster denselben Wert verwenden.
+local ROW_PAD = 7
 local LIMIT_CAPTION_WIDTH = 118
 local LIMIT_VALUE_WIDTH = 78
 

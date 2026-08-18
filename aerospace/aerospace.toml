@@ -57,17 +57,14 @@ gaps.outer.right      = 8
 # ]
 
 # Fenster, die nicht gekachelt werden sollen.
+# Bedingungen in der test-Syntax (`man aerospace-test`); die alte
+# `if.app-id`-Form ist deprecated.
 [[on-window-detected]]
-if.app-id = 'com.apple.systempreferences'
+if = 'test %{app-bundle-id} = com.apple.systempreferences'
 run = ['layout floating']
 
 [[on-window-detected]]
-if.app-id = 'com.apple.ActivityMonitor'
-run = ['layout floating']
-
-[[on-window-detected]]
-if.app-id = 'com.apple.finder'
-if.window-title-regex-substring = 'Informationen|Info'
+if = 'test %{app-bundle-id} = com.apple.ActivityMonitor'
 run = ['layout floating']
 
 # ── Haupt-Modus ─────────────────────────────────────────────────────────────

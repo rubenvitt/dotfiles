@@ -2,4 +2,4 @@
 # VERSION: 3.0
 SETUVAR __fish_initialized:4300
 SETUVAR _fisher_upgraded_to_4_4:\x1d
-SETUVAR fish_user_paths:/Users/rubeen/dev/common/tools\x1e/opt/nanobrew/prefix/bin\x1e/Users/rubeen/\x2edotfiles/r\x2dtools\x1e/Users/rubeen/\x2eantigravity/antigravity/bin\x1e/Users/rubeen/\x2elocal/bin\x1e/Users/rubeen/\x2ecodeium/windsurf/bin\x1e/Applications/Ghostty\x2eapp/Contents/MacOS
+SETUVAR fish_user_paths:/Users/rubeen/\x2elocal/share/mise/installs/node/24\x2e16\x2e0/bin\x1e/Users/rubeen/dev/common/tools\x1e/opt/nanobrew/prefix/bin\x1e/Users/rubeen/\x2edotfiles/r\x2dtools\x1e/Users/rubeen/\x2eantigravity/antigravity/bin\x1e/Users/rubeen/\x2elocal/bin\x1e/Users/rubeen/\x2ecodeium/windsurf/bin\x1e/Applications/Ghostty\x2eapp/Contents/MacOS

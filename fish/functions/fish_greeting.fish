@@ -2,11 +2,11 @@ function fish_greeting
     # ── Colors ──
     set -l dim (set_color brblack)
     set -l blue (set_color brblue)
-    set -l cyan (set_color brcyan)
+    set -l magenta (set_color magenta)
     set -l green (set_color brgreen)
     set -l yellow (set_color bryellow)
     set -l red (set_color brred)
-    set -l bold (set_color --bold brwhite)
+    set -l bold (set_color --bold normal)
     set -l r (set_color normal)
 
     # ── Gather info ──
@@ -38,13 +38,13 @@ function fish_greeting
     printf "  %s─────────────────────────────────────────────%s\n" $dim $r
     printf "  %s▸ %suptime  %s%s\n" $blue $dim $r "$up"
     printf "  %s▸ %sdisk    %s%s\n" $dc $dim $r "$disk"
-    printf "  %s▸ %snode    %sv%s\n" $cyan $dim $r "$nv"
+    printf "  %s▸ %snode    %sv%s\n" $magenta $dim $r "$nv"
 
     # Docker (nur wenn Container laufen)
     if command -q docker
         set -l cnt (docker ps -q 2>/dev/null | count)
         if test "$cnt" -gt 0
-            printf "  %s▸ %sdocker  %s%s running%s\n" $yellow $dim $green $cnt $r
+            printf "  %s▸ %sdocker  %s%s running%s\n" $blue $dim $green $cnt $r
         end
     end
 
@@ -56,7 +56,7 @@ function fish_greeting
             if not git diff --quiet HEAD &>/dev/null
                 set dirty (printf " %s✦%s" $yellow $r)
             end
-            printf "  %s▸ %sgit     %s%s%s\n" $cyan $dim $r "$branch" "$dirty"
+            printf "  %s▸ %sgit     %s%s%s\n" $magenta $dim $r "$branch" "$dirty"
         end
     end
 

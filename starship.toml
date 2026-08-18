@@ -10,6 +10,11 @@ command_timeout = 5000
 [character] # The name of the module we are configuring is 'character'
 success_symbol = '[➜](bold green)' # The 'success_symbol' segment is being set to '➜' with the color 'bold green'
 
+# Directory color: blue stays readable on both light and dark backgrounds
+# (default 'bold cyan' is washed out on light themes)
+[directory]
+style = 'bold blue'
+
 # Disable the package module, hiding it from the prompt completely
 [package]
 disabled = true

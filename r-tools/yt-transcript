@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# yt-transcript - YouTube-Transkription via yt-dlp herunterladen
+
+DEFAULT_LANGS="${YT_TRANSCRIPT_LANGS:-de,en}"
+DEFAULT_SLEEP_REQUESTS="${YT_TRANSCRIPT_SLEEP_REQUESTS:-0.75}"
+DEFAULT_SLEEP_SUBTITLES="${YT_TRANSCRIPT_SLEEP_SUBTITLES:-5}"
+DEFAULT_IMPERSONATE="${YT_TRANSCRIPT_IMPERSONATE:-chrome}"
+DEFAULT_BROWSER="${YT_TRANSCRIPT_BROWSER:-chrome}"
+
+usage() {
+    cat <<'EOF'
+yt-transcript - YouTube-Transkription via yt-dlp herunterladen
+
+Usage:
+  yt-transcript <url>
+  yt-transcript <url> -o transcript.txt
+  yt-transcript <url> -s
+  yt-transcript <url> -c
+  yt-transcript -h | --help
+
+Optionen:
+  -l, --lang <langs>     Sprachprioritaet fuer Untertitel (default: de,en)
+                         Format wie yt-dlp: de,en oder de.*,en.*
+  -o, --output <file>    Zieldatei (default: <video-title>.txt)
+  -s, --stdout           Transkription nach stdout statt in Datei schreiben
+  -c, --clipboard        Transkription zusaetzlich in die Zwischenablage kopieren
+  -b, --browser <name>   Cookies aus Browser nutzen (default: chrome)
+                         YouTube limitiert anonyme Subtitle-Requests mit 429,
+                         daher sind Cookies de facto Pflicht.
+                         Override via YT_TRANSCRIPT_BROWSER=brave|firefox|...
+  --no-cookies           Cookies komplett deaktivieren (i.d.R. fuehrt das zu 429)
+  --cookies <file>       Cookies-Datei an yt-dlp uebergeben (ersetzt --browser)
+  --sleep-requests <sec> Pause zwischen yt-dlp Requests (default: 0.75)
+  --sleep-subtitles <s>  Pause vor Untertitel-Downloads (default: 5)
+  --impersonate <target> Browser-Impersonation (default: chrome, leer = aus)
+                         YouTube blockt Subtitle-Requests ohne TLS-Impersonation
+                         mit HTTP 429. Benoetigt yt-dlp mit curl_cffi-Extra.
+  -k, --keep-vtt         Heruntergeladene Untertiteldatei neben dem Output behalten
+  -h, --help             Diese Hilfe anzeigen
+
+Hinweise:
+  Benoetigt yt-dlp (brew install yt-dlp).
+  Das Tool laedt zuerst normale Untertitel und nutzt Auto-Subs als Fallback.
+  Die Ausgabe ist bereinigter Klartext ohne VTT-Zeitstempel.
+  YouTube-URLs mit & immer quoten: yt-transcript 'https://...&list=...'
+EOF
+}
+
+fail() {
+    echo "Fehler: $*" >&2
+    exit 1
+}
+
+info() {
+    printf '\033[36m==>\033[0m %s\n' "$*" >&2
+}
+
+require_cmd() {
+    command -v "$1" >/dev/null 2>&1 || fail "'$1' wird benoetigt."
+}
+
+cleanup() {
+    if [[ -n "${tmp_dir:-}" && -d "$tmp_dir" ]]; then
+        rm -rf "$tmp_dir"
+    fi
+}
+
+download_subtitles() {
+    local url="$1" langs="$2" dir="$3" sleep_requests="$4" sleep_subtitles="$5" impersonate="$6"
+    shift 6
+    local -a extra_args=("$@")
+    local -a impersonate_args=()
+
+    if [[ -n "$impersonate" ]]; then
+        impersonate_args=(--impersonate "$impersonate")
+    fi
+
+    yt-dlp \
+        --skip-download \
+        --write-subs \
+        --write-auto-subs \
+        --sub-langs "$langs" \
+        --sub-format "vtt/srt" \
+        --no-playlist \
+        --sleep-requests "$sleep_requests" \
+        --sleep-subtitles "$sleep_subtitles" \
+        --retry-sleep "http:exp=1:20" \
+        --retry-sleep "extractor:exp=1:20" \
+        "${impersonate_args[@]}" \
+        "${extra_args[@]}" \
+        -o "$dir/%(title).200B [%(id)s].%(ext)s" \
+        "$url"
+}
+
+find_subtitle() {
+    local dir="$1" langs="$2"
+    local lang candidate
+    local -a lang_list
+
+    IFS=',' read -r -a lang_list <<<"$langs"
+
+    for lang in "${lang_list[@]}"; do
+        lang="${lang//[[:space:]]/}"
+        [[ -n "$lang" ]] || continue
+
+        while IFS= read -r candidate; do
+            printf '%s\n' "$candidate"
+            return 0
+        done < <(find "$dir" -type f \( -name "*.${lang}.vtt" -o -name "*.${lang}.srt" \) | sort)
+    done
+
+    while IFS= read -r candidate; do
+        printf '%s\n' "$candidate"
+        return 0
+    done < <(find "$dir" -type f \( -name "*.vtt" -o -name "*.srt" \) | sort)
+
+    return 1
+}
+
+default_output_path() {
+    local subtitle="$1"
+    local base stem
+
+    base="$(basename "$subtitle")"
+    stem="${base%.*}"
+    stem="${stem%.*}"
+    printf '%s.txt\n' "$stem"
+}
+
+clean_transcript() {
+    local subtitle="$1"
+
+    awk '
+        BEGIN {
+            skip_block = 0
+            previous = ""
+        }
+
+        /^[[:space:]]*WEBVTT/ { next }
+        /^[[:space:]]*(Kind|Language):/ { next }
+        /^[[:space:]]*(STYLE|REGION|NOTE)([[:space:]]|$)/ {
+            skip_block = 1
+            next
+        }
+        skip_block && /^[[:space:]]*$/ {
+            skip_block = 0
+            next
+        }
+        skip_block { next }
+        /^[[:space:]]*$/ { next }
+        /^[[:space:]]*[0-9]+[[:space:]]*$/ { next }
+        /-->/ { next }
+
+        {
+            line = $0
+            gsub(/\r/, "", line)
+            gsub(/<[^>]*>/, "", line)
+            gsub(/&amp;/, "\\&", line)
+            gsub(/&lt;/, "<", line)
+            gsub(/&gt;/, ">", line)
+            gsub(/&quot;/, "\"", line)
+            gsub(/&#39;/, sprintf("%c", 39), line)
+            gsub(/&apos;/, sprintf("%c", 39), line)
+            gsub(/&nbsp;/, " ", line)
+            gsub(/[[:space:]]+/, " ", line)
+            sub(/^[[:space:]]+/, "", line)
+            sub(/[[:space:]]+$/, "", line)
+
+            if (line != "" && line != previous) {
+                print line
+                previous = line
+            }
+        }
+    ' "$subtitle"
+}
+
+write_output() {
+    local subtitle="$1" output="$2" to_stdout="$3" clipboard="$4"
+    local text
+
+    text="$(clean_transcript "$subtitle")"
+    [[ -n "$text" ]] || fail "Transkription ist leer: $subtitle"
+
+    if $to_stdout; then
+        printf '%s\n' "$text"
+    else
+        printf '%s\n' "$text" > "$output"
+        echo "✓ Geschrieben: $output"
+    fi
+
+    if $clipboard; then
+        require_cmd pbcopy
+        printf '%s' "$text" | pbcopy
+        echo "✓ Inhalt in die Zwischenablage kopiert." >&2
+    fi
+}
+
+main() {
+    local url="" output="" langs="$DEFAULT_LANGS"
+    local sleep_requests="$DEFAULT_SLEEP_REQUESTS" sleep_subtitles="$DEFAULT_SLEEP_SUBTITLES"
+    local impersonate="$DEFAULT_IMPERSONATE"
+    local browser="$DEFAULT_BROWSER" cookies_file=""
+    local to_stdout=false clipboard=false keep_vtt=false
+    local -a positional=()
+    local -a ytdlp_extra=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)      usage; return 0 ;;
+            -l|--lang)      langs="${2:?Option $1 braucht einen Wert}"; shift 2 ;;
+            -o|--output)    output="${2:?Option $1 braucht einen Wert}"; shift 2 ;;
+            -s|--stdout)    to_stdout=true; shift ;;
+            -c|--clipboard) clipboard=true; shift ;;
+            -b|--browser)   browser="${2:?Option $1 braucht einen Wert}"; cookies_file=""; shift 2 ;;
+            --no-cookies)   browser=""; cookies_file=""; shift ;;
+            --cookies)      cookies_file="${2:?Option $1 braucht einen Wert}"; browser=""; shift 2 ;;
+            --sleep-requests)  sleep_requests="${2:?Option $1 braucht einen Wert}"; shift 2 ;;
+            --sleep-subtitles) sleep_subtitles="${2:?Option $1 braucht einen Wert}"; shift 2 ;;
+            --impersonate)     impersonate="${2-}"; shift 2 ;;
+            -k|--keep-vtt)  keep_vtt=true; shift ;;
+            --)             shift; while [[ $# -gt 0 ]]; do positional+=("$1"); shift; done ;;
+            -*)             fail "Unbekannte Option: $1" ;;
+            *)              positional+=("$1"); shift ;;
+        esac
+    done
+
+    [[ ${#positional[@]} -eq 1 ]] || { usage >&2; return 1; }
+    url="${positional[0]}"
+    [[ -n "$langs" ]] || fail "Keine Untertitelsprachen angegeben."
+
+    if [[ -n "$cookies_file" ]]; then
+        ytdlp_extra+=(--cookies "$cookies_file")
+    elif [[ -n "$browser" ]]; then
+        ytdlp_extra+=(--cookies-from-browser "$browser")
+    fi
+
+    require_cmd yt-dlp
+    require_cmd awk
+    require_cmd find
+
+    tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/yt-transcript.XXXXXX")"
+    trap cleanup EXIT
+
+    info "Lade Untertitel mit yt-dlp..."
+    local ytdlp_log="$tmp_dir/yt-dlp.log"
+    if ! download_subtitles "$url" "$langs" "$tmp_dir" "$sleep_requests" "$sleep_subtitles" "$impersonate" "${ytdlp_extra[@]}" >"$ytdlp_log" 2>&1; then
+        sed 's/^/yt-dlp: /' "$ytdlp_log" >&2
+        if grep -Eq "HTTP Error 429|Too Many Requests" "$ytdlp_log"; then
+            fail "YouTube rate-limitiert die Untertitel-Anfrage. Versuche es spaeter erneut oder mit Browser-Cookies: yt-transcript --browser chrome '$url'"
+        fi
+        fail "yt-dlp konnte keine Untertitel laden."
+    fi
+
+    local subtitle
+    subtitle="$(find_subtitle "$tmp_dir" "$langs")" || fail "Keine Untertitel gefunden fuer: $langs"
+
+    if [[ -z "$output" && $to_stdout == false ]]; then
+        output="$(default_output_path "$subtitle")"
+    fi
+
+    write_output "$subtitle" "$output" "$to_stdout" "$clipboard"
+
+    if $keep_vtt; then
+        local vtt_output
+        vtt_output="${output:-$(default_output_path "$subtitle")}"
+        vtt_output="${vtt_output%.*}.${subtitle##*.}"
+        cp "$subtitle" "$vtt_output"
+        echo "✓ Roh-Untertitel behalten: $vtt_output"
+    fi
+}
+
+main "$@"

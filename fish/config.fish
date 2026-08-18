@@ -18,8 +18,8 @@ set -gx PATH $PATH /Users/rubeen/.lmstudio/bin
 # End of LM Studio CLI section
 # pnpm
 set -gx PNPM_HOME "/Users/rubeen/Library/pnpm"
-if not string match -q -- $PNPM_HOME $PATH
-  set -gx PATH "$PNPM_HOME" $PATH
+if not string match -q -- "$PNPM_HOME/bin" $PATH
+  set -gx PATH "$PNPM_HOME/bin" $PATH
 end
 # pnpm end
 set -gx PATH $HOME/.pnpm-global/bin $PATH
@@ -34,3 +34,7 @@ mise activate | source
 function shopt
     return 0
 end
+
+# Pi
+fish_add_path "/Users/rubeen/.local/share/mise/installs/node/24.16.0/bin"
+source /Users/rubeen/.config/op/plugins.sh

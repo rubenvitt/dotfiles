@@ -19,14 +19,18 @@ local API = "http://127.0.0.1:7837/api/v1"
 local FOCUS = "/Applications/Irrlicht.app/Contents/MacOS/irrlicht-focus"
 local MAX_ROWS = 10
 local MAX_LIMIT_ROWS = 6   -- drei Profile mal zwei Zeitfenster
-local POPUP_WIDTH = 260
-
 -- Kompakteres Raster als die Bar selbst: die Defaults (14/13pt, 28px hohe
 -- Zeilen, 5px Item-Polster) sind für einzelne Items in der Leiste gedacht,
 -- in einer Liste aus bis zu sechzehn Zeilen wird daraus viel Leerraum.
+--
+-- Die Session-Zeilen bekommen bewusst keine feste Breite: eine erzwungene
+-- Spaltenbreite hängt hinter jeder kurzen Zeile Leerraum an. Nur die beiden
+-- Limit-Spalten sind fest, damit die Prozentwerte untereinander stehen.
 local ROW_FONT = 11.0
-local ROW_HEIGHT = 20
-local ROW_PAD = 2
+local ROW_HEIGHT = 18
+local ROW_PAD = 0
+local LIMIT_CAPTION_WIDTH = 118
+local LIMIT_VALUE_WIDTH = 78
 
 local PROBE = "curl -s --max-time 3 " .. API ..
   "/sessions | /usr/bin/python3 $CONFIG_DIR/helpers/irrlicht_probe.py"
@@ -96,7 +100,7 @@ for i = 1, MAX_LIMIT_ROWS do
     background = { height = ROW_HEIGHT },
     icon = {
       string = "",
-      width = POPUP_WIDTH * 0.56,
+      width = LIMIT_CAPTION_WIDTH,
       align = "left",
       color = colors.grey,
       padding_left = ROW_PAD,
@@ -105,7 +109,7 @@ for i = 1, MAX_LIMIT_ROWS do
     },
     label = {
       string = "",
-      width = POPUP_WIDTH * 0.44,
+      width = LIMIT_VALUE_WIDTH,
       align = "right",
       padding_left = 0,
       padding_right = ROW_PAD,
@@ -125,13 +129,12 @@ for i = 1, MAX_ROWS do
     icon = {
       string = "●",
       padding_left = ROW_PAD,
-      padding_right = 5,
+      padding_right = 4,
       color = colors.grey,
       font = { family = settings.font.text, size = ROW_FONT },
     },
     label = {
       string = "",
-      width = POPUP_WIDTH - 22,
       align = "left",
       padding_left = 0,
       padding_right = ROW_PAD,

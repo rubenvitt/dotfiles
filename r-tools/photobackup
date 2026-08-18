@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+# photobackup - Vollständiges, nach Jahr sortiertes Backup der iCloud-Fotomediathek
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# Konfiguration (per Umgebungsvariable oder Argument überschreibbar)
+# ---------------------------------------------------------------------------
+LIBRARY="${PHOTOBACKUP_LIBRARY:-$HOME/Pictures/Photos Library.photoslibrary}"
+DEST="${PHOTOBACKUP_DEST:-/Volumes/Backups/iCloud-Photos-Backup}"
+MIN_FREE_GB="${PHOTOBACKUP_MIN_FREE_GB:-15}"   # interne Platte: Abbruch-Schwelle
+WATCH_INTERVAL="${PHOTOBACKUP_WATCH_INTERVAL:-60}"  # Sekunden zwischen Platz-Checks
+
+usage() {
+  cat <<'EOF'
+photobackup - Vollständiges, nach Jahr sortiertes Backup der iCloud-Fotomediathek
+
+Exportiert die komplette Apple-Photos-Mediathek (inkl. der nur in der iCloud
+liegenden Originale) nach Jahres-Ordnern auf eine externe Platte. Wrapper um
+osxphotos: sortiert nach echtem Aufnahmedatum, lädt fehlende Originale aus der
+iCloud und ist jederzeit abbrech- und fortsetzbar.
+
+VERWENDUNG:
+  photobackup [ZIELORDNER]
+  photobackup --dry-run
+  photobackup -h | --help
+
+ARGUMENTE:
+  ZIELORDNER   Zielverzeichnis (Standard: /Volumes/Backups/iCloud-Photos-Backup)
+
+OPTIONEN:
+  --dry-run    Nur anzeigen, was passieren würde (osxphotos --dry-run)
+  -h, --help   Diese Hilfe
+
+UMGEBUNGSVARIABLEN:
+  PHOTOBACKUP_LIBRARY         Pfad zur .photoslibrary
+                              (Standard: ~/Pictures/Photos Library.photoslibrary)
+  PHOTOBACKUP_DEST            Zielverzeichnis
+  PHOTOBACKUP_MIN_FREE_GB     Abbruch, wenn interne Platte darunter fällt (Std. 15)
+  PHOTOBACKUP_WATCH_INTERVAL  Sekunden zwischen Speicher-Checks (Std. 60)
+
+HINWEISE:
+  * Erst-Lauf lädt ggf. hunderte GB aus der iCloud -> Stunden bis Tage.
+  * Abbruch mit Strg-C ist sicher; erneuter Start setzt via --update fort.
+  * Benötigt osxphotos:  uv tool install osxphotos  (oder: pipx install osxphotos)
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# Argumente
+# ---------------------------------------------------------------------------
+DRY_RUN=0
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) usage; exit 0 ;;
+    --dry-run) DRY_RUN=1 ;;
+    -*) echo "Unbekannte Option: $arg" >&2; usage >&2; exit 2 ;;
+    *)  DEST="$arg" ;;
+  esac
+done
+
+# ---------------------------------------------------------------------------
+# Hübsche Ausgabe (gum optional)
+# ---------------------------------------------------------------------------
+have_gum() { command -v gum >/dev/null 2>&1; }
+info()  { if have_gum; then gum style --foreground 4 "▸ $*"; else echo "▸ $*"; fi; }
+ok()    { if have_gum; then gum style --foreground 2 "✓ $*"; else echo "✓ $*"; fi; }
+warn()  { if have_gum; then gum style --foreground 3 "⚠ $*"; else echo "⚠ $*" >&2; fi; }
+die()   { if have_gum; then gum style --foreground 1 "✗ $*"; else echo "✗ $*" >&2; fi; exit 1; }
+
+# ---------------------------------------------------------------------------
+# Vorab-Checks
+# ---------------------------------------------------------------------------
+command -v osxphotos >/dev/null 2>&1 || die \
+  "osxphotos nicht gefunden. Installation:  uv tool install osxphotos  (oder pipx install osxphotos)"
+
+[ -d "$LIBRARY" ] || die "Fotomediathek nicht gefunden: $LIBRARY"
+
+# Zielvolume muss gemountet sein. Wir prüfen den Mount-Point (übergeordnetes
+# /Volumes/<Name>), nicht den (evtl. noch fehlenden) Backup-Unterordner.
+DEST_VOLUME="$DEST"
+while [ "$DEST_VOLUME" != "/" ] && [ ! -d "$DEST_VOLUME" ]; do
+  DEST_VOLUME="$(dirname "$DEST_VOLUME")"
+done
+case "$DEST_VOLUME" in
+  /Volumes/*) MOUNT="/Volumes/$(echo "${DEST_VOLUME#/Volumes/}" | cut -d/ -f1)" ;;
+  *)          MOUNT="$DEST_VOLUME" ;;
+esac
+mountpoint_exists() { [ -d "$MOUNT" ] && [ "$MOUNT" != "/" ]; }
+if [ "$MOUNT" != "$DEST_VOLUME" ] || [[ "$DEST" == /Volumes/* ]]; then
+  mountpoint_exists || die "Zielvolume nicht gemountet: $MOUNT"
+fi
+
+mkdir -p "$DEST" || die "Zielverzeichnis nicht anlegbar: $DEST"
+[ -w "$DEST" ] || die "Zielverzeichnis nicht beschreibbar: $DEST"
+
+LOGDIR="$DEST/_logs"
+mkdir -p "$LOGDIR"
+TS="$(date +%Y%m%d-%H%M%S)"
+LOGFILE="$LOGDIR/photobackup-$TS.log"
+REPORT="$LOGDIR/report-$TS.csv"
+
+# Freien Platz der internen Platte (Root-Volume) in GB ermitteln.
+free_gb_root() { df -g / | awk 'NR==2 {print $4}'; }
+
+# ---------------------------------------------------------------------------
+# Info-Ausgabe
+# ---------------------------------------------------------------------------
+info "Mediathek : $LIBRARY"
+info "Ziel      : $DEST"
+info "Log       : $LOGFILE"
+info "Frei (/)  : $(free_gb_root) GB  (Abbruch-Schwelle: ${MIN_FREE_GB} GB)"
+[ "$DRY_RUN" -eq 1 ] && warn "DRY-RUN: es wird nichts geschrieben."
+
+# ---------------------------------------------------------------------------
+# osxphotos-Kommando zusammenbauen
+# ---------------------------------------------------------------------------
+osxphotos_args=(
+  export "$DEST"
+  --library "$LIBRARY"
+  --directory "{created.year}"
+  --download-missing --use-photokit
+  --update
+  --sidecar xmp
+  --retry 3
+  --report "$REPORT"
+  --verbose --timestamp
+)
+[ "$DRY_RUN" -eq 1 ] && osxphotos_args+=(--dry-run)
+
+# ---------------------------------------------------------------------------
+# Speicher-Wächter: stoppt den Export sauber, wenn die interne Platte vollläuft
+# ---------------------------------------------------------------------------
+watchdog() {
+  local pid="$1"
+  while kill -0 "$pid" 2>/dev/null; do
+    local free; free="$(free_gb_root)"
+    if [ "${free:-0}" -lt "$MIN_FREE_GB" ]; then
+      warn "Nur noch ${free} GB frei (< ${MIN_FREE_GB} GB) — stoppe Export sauber. Später einfach neu starten."
+      kill -INT "$pid" 2>/dev/null || true
+      return
+    fi
+    sleep "$WATCH_INTERVAL"
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Lauf
+#   * caffeinate -w $$ hält den Mac wach, solange dieses Skript läuft.
+#   * osxphotos läuft als DIREKT verfolgter Prozess ($! == osxphotos), damit
+#     der Watchdog/Strg-C es sauber per SIGINT stoppen können. Ausgabe geht via
+#     Prozess-Substitution zusätzlich ins Logfile (keine Pipeline -> $! bleibt
+#     osxphotos, nicht tee).
+# ---------------------------------------------------------------------------
+info "Starte Export … (Abbruch mit Strg-C ist sicher, --update setzt fort)"
+
+caffeinate -i -w "$$" &
+CAF_PID=$!
+
+osxphotos "${osxphotos_args[@]}" &> >(tee "$LOGFILE") &
+RUN_PID=$!
+
+watchdog "$RUN_PID" &
+WATCH_PID=$!
+
+# Strg-C / TERM sauber an osxphotos weiterreichen
+trap 'kill -INT "$RUN_PID" 2>/dev/null || true' INT TERM
+
+set +e
+wait "$RUN_PID"
+STATUS=$?
+set -e
+
+kill "$WATCH_PID" 2>/dev/null || true
+kill "$CAF_PID"   2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# Abschluss
+# ---------------------------------------------------------------------------
+if [ "$STATUS" -eq 0 ]; then
+  ok "Backup abgeschlossen. Report: $REPORT"
+else
+  warn "Export beendet mit Status $STATUS (Abbruch oder Fehler). Erneut starten setzt via --update fort. Log: $LOGFILE"
+fi
+exit "$STATUS"

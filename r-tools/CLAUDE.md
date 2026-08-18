@@ -11,6 +11,7 @@ r-tools is a collection of bash utility scripts for macOS, part of a larger dotf
 - **r-tools** — Interactive tool launcher/dispatcher. Discovers executables in its directory, extracts descriptions from comments, provides help and a TUI picker via `gum`.
 - **pw** — Secure password generator with concealed macOS clipboard integration (NSPasteboard with ConcealedType), auto-clear timeout, and character requirement enforcement.
 - **rnd** — Random string generator supporting hex, base64, and alphanumeric encodings. Copies to clipboard via `pbcopy`.
+- **photobackup** — Complete, year-sorted backup of the iCloud photo library to an external drive. Wraps `osxphotos export` with `--directory "{created.year}"`, `--download-missing --use-photokit` (streams the iCloud-only originals — most of the library when "Optimize Mac Storage" is on), and `--update` for resumable incremental runs. Adds a `caffeinate` wrapper, a background disk-space watchdog that cleanly SIGINTs the export if the boot disk runs low, and timestamped logs/report on the target drive. Design: `docs/2026-07-23-photobackup-design.md`.
 
 ### Adding New Tools
 

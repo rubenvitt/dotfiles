@@ -37,8 +37,11 @@ show_help() {
 }
 
 list_tools() {
-    local tools
-    mapfile -t tools < <(get_tools)
+    local tools=()
+    local tool
+    while IFS= read -r tool; do
+        tools+=("$tool")
+    done < <(get_tools)
 
     if [[ ${#tools[@]} -eq 0 ]]; then
         echo "No tools found in $TOOLS_DIR"
@@ -60,8 +63,11 @@ interactive() {
         exit 1
     }
 
-    local tools
-    mapfile -t tools < <(get_tools)
+    local tools=()
+    local tool
+    while IFS= read -r tool; do
+        tools+=("$tool")
+    done < <(get_tools)
 
     if [[ ${#tools[@]} -eq 0 ]]; then
         echo "No tools found"

@@ -9,10 +9,18 @@ gibt Zeilen aus, die sich in Lua ohne JSON-Parser auswerten lassen:
     S|<session-id>|<state>|<projekt>
 
 Die Abo-Limits haengen je Session unter metrics.rate_limit. Zu welchem Abo
-eine Session gehoert, steht nicht in den Daten -- es ergibt sich aus dem
-CLAUDE_CONFIG_DIR ihres Prozesses, das `ps eww` liefert (siehe r-tools/ccp:
-jedes Profil hat ein eigenes Config-Verzeichnis). Je Profil gewinnt der
+eine Session gehoert, steht nicht in den Daten. Fuer Claude Code ergibt es
+sich aus dem CLAUDE_CONFIG_DIR ihres Prozesses, das `ps eww` liefert (siehe
+r-tools/ccp: jedes Profil hat ein eigenes Config-Verzeichnis). Andere
+Adapter -- Codex etwa -- haben kein solches Verzeichnis und teils gar keine
+PID; sie werden unter ihrem Adapternamen gefuehrt. Eine Claude-Code-Session
+ohne aufloesbare PID bleibt aussen vor, sonst entstuende neben dem Profil
+ein zweiter Eintrag mit denselben Zahlen. Je Abo gewinnt der
 Eintrag mit dem juengsten sampled_at.
+
+Welche Zeitfenster ein Anbieter meldet, ist nicht vorgegeben: Claude Code
+liefert 300 und 10080 Minuten, Codex nur 10080. Ausgegeben wird, was da
+ist.
 
 Limits gibt es nur aus API-Antworten, ein Profil ohne laufende Session
 liefert also keine. Damit die anderen Abos trotzdem sichtbar bleiben, wird
@@ -85,6 +93,24 @@ def profile_name(path):
     return name[len("claude-"):] if name.startswith("claude-") else name
 
 
+def account_of(agent, dirs):
+    """Abo, unter dem die Session laeuft.
+
+    Claude-Code-Sessions unterscheiden sich nach ccp-Profil, alles andere
+    laeuft unter seinem Adapternamen. Ohne PID -- Codex meldet keine -- bleibt
+    nur der Adapter.
+    """
+    adapter = agent.get("adapter") or "?"
+    path = dirs.get(str(agent.get("pid")))
+    if adapter == "claude-code":
+        # Ohne aufloesbare PID -- beendete Session, ps ohne Treffer -- bliebe
+        # nur der Adaptername, und der stuende als eigenes "Abo" neben dem
+        # Profil, zu dem dieselben Zahlen gehoeren. Lieber auslassen: eine
+        # laufende Session desselben Profils liefert sie ohnehin.
+        return profile_name(path) if path else None
+    return adapter
+
+
 def main():
     try:
         data = json.load(sys.stdin)
@@ -98,14 +124,15 @@ def main():
     cache = load_cache()
     changed = False
     for agent in agents:
-        path = dirs.get(str(agent.get("pid")))
         limit = (agent.get("metrics") or {}).get("rate_limit") or {}
-        if not path or not limit.get("windows"):
+        if not limit.get("windows"):
             continue
-        profile = profile_name(path)
+        account = account_of(agent, dirs)
+        if not account:
+            continue
         sampled = limit.get("sampled_at", 0)
-        if sampled > (cache.get(profile) or {}).get("sampled_at", -1):
-            cache[profile] = {"sampled_at": sampled, "windows": limit["windows"]}
+        if sampled > (cache.get(account) or {}).get("sampled_at", -1):
+            cache[account] = {"sampled_at": sampled, "windows": limit["windows"]}
             changed = True
     if changed:
         save_cache(cache)
@@ -117,19 +144,20 @@ def main():
     print(states.count("working"), states.count("waiting"), len(agents))
 
     now = time.time()
-    for profile in sorted(cache):
-        entry = cache[profile] or {}
+    for account in sorted(cache):
+        entry = cache[account] or {}
         age = max(0, now - entry.get("sampled_at", 0))
-        for minutes in (300, 10080):
-            window = next((w for w in (entry.get("windows") or [])
-                           if w.get("window_minutes") == minutes), None)
-            if not window:
+        windows = sorted((entry.get("windows") or []),
+                         key=lambda w: w.get("window_minutes", 0))
+        for window in windows:
+            minutes = window.get("window_minutes")
+            if not minutes:
                 continue
             remaining = window.get("resets_at", 0) - now
             if remaining <= 0:
                 # Fenster ist seit der Messung durchgelaufen.
                 continue
-            print("L|%s|%d|%d|%d|%d" % (profile, minutes,
+            print("L|%s|%d|%d|%d|%d" % (account, minutes,
                                         round(window.get("used_percent", 0)),
                                         remaining, age))
 

@@ -18,7 +18,7 @@ local settings = require("settings")
 local API = "http://127.0.0.1:7837/api/v1"
 local FOCUS = "/Applications/Irrlicht.app/Contents/MacOS/irrlicht-focus"
 local MAX_ROWS = 10
-local MAX_LIMIT_ROWS = 6   -- drei Profile mal zwei Zeitfenster
+local MAX_LIMIT_ROWS = 8   -- drei ccp-Profile mal zwei Fenster, plus andere Adapter
 -- Kompakteres Raster als die Bar selbst: die Defaults (14/13pt, 28px hohe
 -- Zeilen, 5px Item-Polster) sind für einzelne Items in der Leiste gedacht,
 -- in einer Liste aus bis zu sechzehn Zeilen wird daraus viel Leerraum.
@@ -41,7 +41,20 @@ local LIMIT_VALUE_WIDTH = 78
 local PROBE = "curl -s --max-time 3 " .. API ..
   "/sessions | /usr/bin/python3 $CONFIG_DIR/helpers/irrlicht_probe.py"
 
-local WINDOW_LABEL = { ["300"] = "5 Std", ["10080"] = "Woche" }
+-- Welche Zeitfenster gemeldet werden, gibt der Anbieter vor: Claude Code
+-- nennt 300 und 10080 Minuten, Codex nur 10080. Unbekannte Längen bekommen
+-- deshalb eine berechnete Beschriftung statt zu fehlen.
+local WINDOW_LABEL = { ["300"] = "5 Std", ["1440"] = "Tag", ["10080"] = "Woche" }
+
+local function window_label(minutes)
+  local known = WINDOW_LABEL[minutes]
+  if known then return known end
+  local n = tonumber(minutes) or 0
+  if n >= 10080 then return math.floor(n / 10080) .. " Wo" end
+  if n >= 1440 then return math.floor(n / 1440) .. " Tg" end
+  if n >= 60 then return math.floor(n / 60) .. " Std" end
+  return n .. " Min"
+end
 
 local STATE_COLOR = {
   waiting = colors.yellow,
@@ -192,7 +205,7 @@ local function update()
         age = tonumber(age) or 0
         -- Solange eine Session des Profils läuft, ist der Wert sekundenaktuell.
         -- Erst wenn er merklich altert, gehört sein Alter dazu.
-        local caption = profile .. " · " .. (WINDOW_LABEL[minutes] or (minutes .. "m"))
+        local caption = profile .. " · " .. window_label(minutes)
         if age > 300 then
           caption = caption .. " · vor " .. human_eta(age)
         end

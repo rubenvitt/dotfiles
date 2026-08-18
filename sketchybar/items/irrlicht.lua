@@ -9,11 +9,12 @@ local settings = require("settings")
 -- wird der lokale Daemon direkt abgefragt — dieselbe Quelle, aus der sich
 -- auch das Menü der App speist.
 --
--- Nicht enthalten: das Wochen-/Tageslimit des Abos. Der Daemon kennt es
--- nicht (limits/usage/quota/account antworten mit 404), er schätzt nur
--- Kosten. Die Tagesschätzung steht deshalb als Schätzung im Popup; die
--- Wochensumme der API ist unbrauchbar (sie zählt kumulative Werte je
--- Bucket erneut und liegt um Größenordnungen daneben).
+-- Die Abo-Limits stecken nicht in einem eigenen Endpunkt, sondern je
+-- Session unter metrics.rate_limit: ein Fenster über 300 Minuten (5 Std)
+-- und eines über 10080 Minuten (7 Tage), jeweils mit Prozentwert und
+-- Reset-Zeitpunkt. Gesetzt ist das Feld nur bei Sessions, die zuletzt
+-- tatsächlich mit der API gesprochen haben — deshalb gewinnt der Eintrag
+-- mit dem jüngsten sampled_at.
 
 local API = "http://127.0.0.1:7837/api/v1"
 local MENU_URL = "http://127.0.0.1:7837/"
@@ -24,25 +25,31 @@ local POPUP_WIDTH = 300
 -- Erste Zeile: "<working> <waiting> <gesamt>", danach je Session eine Zeile
 -- "<session-id>|<state>|<projekt>". Sortiert nach Dringlichkeit, damit die
 -- wartenden Sessions oben stehen.
-local SESSIONS_CMD = "curl -s --max-time 3 " .. API .. "/sessions | /usr/bin/python3 -c " .. [['import sys, json
+local SESSIONS_CMD = "curl -s --max-time 3 " .. API .. "/sessions | /usr/bin/python3 -c " .. [['import sys, json, time
 try: d = json.load(sys.stdin)
 except Exception: raise SystemExit
-rows = []
+rows, limit, sampled = [], None, -1
 for g in (d.get("groups") or []):
     for a in (g.get("agents") or []):
         rows.append((a.get("state") or "", a.get("session_id") or "", a.get("project_name") or g.get("name") or "?"))
+        rl = (a.get("metrics") or {}).get("rate_limit") or {}
+        if rl.get("windows") and rl.get("sampled_at", 0) > sampled:
+            sampled, limit = rl["sampled_at"], rl["windows"]
 order = {"waiting": 0, "working": 1, "ready": 2}
 rows.sort(key=lambda r: (order.get(r[0], 9), r[2]))
 states = [r[0] for r in rows]
 print(states.count("working"), states.count("waiting"), len(rows))
+now = time.time()
+for minutes in (300, 10080):
+    w = next((x for x in (limit or []) if x.get("window_minutes") == minutes), None)
+    if w:
+        print("L|%%d|%%d|%%d" %% (minutes, w.get("used_percent", 0), max(0, w.get("resets_at", 0) - now)))
+    else:
+        print("L|%%d||" %% minutes)
 for state, sid, project in rows[:%d]:
-    print("%%s|%%s|%%s" %% (sid, state, project))']]
+    print("S|%%s|%%s|%%s" %% (sid, state, project))']]
 
 SESSIONS_CMD = string.format(SESSIONS_CMD, MAX_ROWS)
-
-local COST_CMD = "curl -s --max-time 3 " .. API .. "/history?range=day\\&chart=cost | /usr/bin/python3 -c " .. [['import sys, json
-try: print("%.2f" % json.load(sys.stdin).get("total", 0.0))
-except Exception: raise SystemExit']]
 
 local STATE_COLOR = {
   waiting = colors.yellow,
@@ -77,24 +84,44 @@ local irrlicht = sbar.add("item", "irrlicht", {
   click_script = "sketchybar --set irrlicht popup.drawing=toggle",
 })
 
--- Kopfzeile: geschätzte Tageskosten. Eigenes Update-Intervall, die Zahl
--- ändert sich träge und hängt an einem anderen Endpunkt.
-local cost = sbar.add("item", "irrlicht.cost", {
-  position = "popup.irrlicht",
-  update_freq = 60,
-  icon = {
-    string = "heute (geschätzt)",
-    width = POPUP_WIDTH / 2,
-    align = "left",
-    color = colors.grey,
-  },
-  label = {
-    string = "—",
-    width = POPUP_WIDTH / 2,
-    align = "right",
-    font = { family = settings.font.numbers },
-  },
-})
+-- Kopfzeilen: die beiden Limit-Fenster des Abos.
+local LIMIT_LABELS = { [300] = "5 Std", [10080] = "Woche" }
+local limits = {}
+for _, minutes in ipairs({ 300, 10080 }) do
+  limits[minutes] = sbar.add("item", "irrlicht.limit." .. minutes, {
+    position = "popup.irrlicht",
+    icon = {
+      string = LIMIT_LABELS[minutes],
+      width = POPUP_WIDTH / 3,
+      align = "left",
+      color = colors.grey,
+    },
+    label = {
+      string = "—",
+      width = POPUP_WIDTH / 3 * 2,
+      align = "right",
+      font = { family = settings.font.numbers },
+    },
+  })
+end
+
+-- Ab 90 Prozent wird es eng, ab 70 lohnt der Blick auf die Uhr.
+local function limit_color(percent)
+  if percent >= 90 then return colors.red end
+  if percent >= 70 then return colors.orange end
+  if percent >= 50 then return colors.yellow end
+  return colors.green
+end
+
+-- Restzeit knapp: Stunden ab einer Stunde, darunter Minuten.
+local function human_eta(seconds)
+  if seconds >= 86400 then
+    return math.floor(seconds / 86400) .. "d " .. math.floor((seconds % 86400) / 3600) .. "h"
+  elseif seconds >= 3600 then
+    return math.floor(seconds / 3600) .. "h " .. math.floor((seconds % 3600) / 60) .. "m"
+  end
+  return math.max(0, math.floor(seconds / 60)) .. "m"
+end
 
 -- Feste Zeilen-Reserve: Items im Update-Callback anzulegen würde bei jedem
 -- Durchlauf neue erzeugen (siehe items/menus.lua, gleiches Muster).
@@ -163,12 +190,41 @@ local function update()
       },
     })
 
+    for _, minutes in ipairs({ 300, 10080 }) do
+      local item = limits[minutes]
+      local percent, eta
+      for _, line in ipairs(lines) do
+        local m, p, e = string.match(line, "^L|(%d+)|(%d*)|(%d*)$")
+        if m and tonumber(m) == minutes then percent, eta = p, e end
+      end
+      if percent and percent ~= "" then
+        percent = tonumber(percent)
+        item:set({
+          drawing = true,
+          label = {
+            string = percent .. "%  ·  " .. human_eta(tonumber(eta) or 0),
+            color = limit_color(percent),
+          },
+        })
+      else
+        -- Kein Fenster gemeldet: keine Session hat zuletzt mit der API
+        -- gesprochen, ein alter Wert wäre irreführend.
+        item:set({ drawing = true, label = { string = "—", color = colors.grey } })
+      end
+    end
+
+    -- Session-Zeilen stehen nach den beiden L-Zeilen.
+    local session_lines = {}
+    for _, line in ipairs(lines) do
+      if string.match(line, "^S|") then session_lines[#session_lines + 1] = line end
+    end
+
     for i = 1, MAX_ROWS do
-      local line = lines[i + 1]
+      local line = session_lines[i]
       -- Nur alphanumerische IDs mit Bindestrich weiterreichen — deckt die
       -- UUIDs der Claude-Code-Sessions ab wie auch die kurzen proc-IDs
       -- fertiger Sessions, und nichts davon kann ein click_script verlassen.
-      local sid, state, project = string.match(line or "", "^([%w%-]+)|([%a]*)|(.*)$")
+      local sid, state, project = string.match(line or "", "^S|([%w%-]+)|([%a]*)|(.*)$")
       if sid then
         rows[i]:set({
           drawing = true,
@@ -183,17 +239,7 @@ local function update()
   end)
 end
 
-local function update_cost()
-  sbar.exec(COST_CMD, function(out)
-    local value = string.match(out or "", "[%d%.]+")
-    cost:set({ label = { string = value and ("$" .. value) or "—" } })
-  end)
-end
-
 irrlicht:subscribe("routine", update)
 irrlicht:subscribe("forced", update)
-cost:subscribe("routine", update_cost)
-cost:subscribe("forced", update_cost)
 
 update()
-update_cost()

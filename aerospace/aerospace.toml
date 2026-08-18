@@ -47,12 +47,14 @@ key-mapping.preset = 'qwerty'
 # Nur die Workspaces, die auch gebunden sind.
 persistent-workspaces = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
 
-# Abstände. outer.top = Sketchybar-Höhe (40, siehe sketchybar/bar.lua) + 8 Luft.
+# Abstände. outer.top bleibt bei 8: AeroSpace kachelt ohnehin nur in den
+# sichtbaren Bereich unterhalb der Menüleiste, und die Sketchybar liegt
+# darüber — ein zusätzlicher Bar-Höhen-Offset zählt doppelt.
 gaps.inner.horizontal = 8
 gaps.inner.vertical   = 8
 gaps.outer.left       = 8
 gaps.outer.bottom     = 8
-gaps.outer.top        = 48
+gaps.outer.top        = 8
 gaps.outer.right      = 8
 
 # Sketchybar über den Workspace-Wechsel informieren.

@@ -1,0 +1,19 @@
+#!/bin/bash
+# JankyBorders — farbiger Rahmen um das fokussierte Fenster.
+# Doku: man borders
+#
+# Symlink: ~/.config/borders/bordersrc -> ~/.dotfiles/borders/bordersrc
+# Autostart: aerospace.toml → after-startup-command
+#
+# Farben folgen dem Sketchybar-Schema (sketchybar/colors.lua):
+#   blue 0xff76cce0 (aktiv), bg2 0xff414550 (inaktiv)
+
+options=(
+    style=round
+    width=6.0
+    hidpi=on
+    active_color=0xff76cce0
+    inactive_color=0xff414550
+)
+
+borders "${options[@]}"

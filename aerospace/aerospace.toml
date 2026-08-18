@@ -16,7 +16,11 @@ config-version = 2
 start-at-login = true
 auto-reload-config = true
 
-after-startup-command = []
+# JankyBorders mitstarten — es erkennt eine bereits laufende Instanz selbst.
+# Sketchybar NICHT hier starten: es läuft als brew-service
+# (`brew services start felixkratz/formulae/sketchybar`) und würde sonst
+# als zweite Bar-Instanz hochkommen.
+after-startup-command = ['exec-and-forget /opt/homebrew/bin/borders']
 
 # Normalisierung: verschachtelte Container automatisch aufräumen.
 enable-normalization-flatten-containers = true
@@ -43,18 +47,19 @@ key-mapping.preset = 'qwerty'
 # Nur die Workspaces, die auch gebunden sind.
 persistent-workspaces = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
 
-# Abstände. outer.top später ggf. auf die Sketchybar-Höhe anheben.
+# Abstände. outer.top = Sketchybar-Höhe (40, siehe sketchybar/bar.lua) + 8 Luft.
 gaps.inner.horizontal = 8
 gaps.inner.vertical   = 8
 gaps.outer.left       = 8
 gaps.outer.bottom     = 8
-gaps.outer.top        = 8
+gaps.outer.top        = 48
 gaps.outer.right      = 8
 
-# Sketchybar-Anbindung — erst aktivieren, wenn Sketchybar auf AeroSpace umgebaut ist:
-# exec-on-workspace-change = ['/bin/bash', '-c',
-#     'sketchybar --trigger aerospace_workspace_change FOCUSED=$AEROSPACE_FOCUSED_WORKSPACE'
-# ]
+# Sketchybar über den Workspace-Wechsel informieren.
+# items/spaces.lua hört auf dieses Custom-Event.
+exec-on-workspace-change = ['/bin/bash', '-c',
+    '/opt/homebrew/bin/sketchybar --trigger aerospace_workspace_change FOCUSED_WORKSPACE=$AEROSPACE_FOCUSED_WORKSPACE'
+]
 
 # Fenster, die nicht gekachelt werden sollen.
 # Bedingungen in der test-Syntax (`man aerospace-test`); die alte
@@ -120,10 +125,10 @@ run = ['layout floating']
 
 # ── Resize-Modus (Ctrl+Alt+R, verlassen mit Esc/Enter) ──────────────────────
 [mode.resize.binding]
-    left  = 'resize width -50'
-    right = 'resize width +50'
-    up    = 'resize height -50'
-    down  = 'resize height +50'
+    left  = 'resize width +50'
+    right = 'resize width -50'
+    up    = 'resize height +50'
+    down  = 'resize height -50'
     b     = 'balance-sizes'
     esc   = 'mode main'
     enter = 'mode main'

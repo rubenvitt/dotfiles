@@ -367,6 +367,7 @@ setupSymlinks() {
 
   # Window/Status
   link ~/.dotfiles/aerospace              ~/.config/aerospace
+  link ~/.dotfiles/borders                ~/.config/borders
   link ~/.dotfiles/sketchybar             ~/.config/sketchybar
 
   # Raycast / Docker

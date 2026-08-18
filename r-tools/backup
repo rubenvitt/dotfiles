@@ -17,6 +17,91 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 die() { printf 'backup: %s\n' "$*" >&2; exit 1; }
 info() { printf '\033[36m==>\033[0m %s\n' "$*"; }
 
+# --- styling / interactivity ------------------------------------------------
+
+BOLD="" DIM="" RESET=""
+init_style() {
+  if [ -t 1 ]; then
+    BOLD=$'\033[1m'; DIM=$'\033[2m'; RESET=$'\033[0m'
+  fi
+}
+
+has_gum() { command -v gum >/dev/null 2>&1; }
+
+# fancy: only decorate / go interactive when stdout is a terminal AND gum exists.
+# Collapses "no gum" and "piped output" into one plain fallback path.
+fancy() { [ -t 1 ] && has_gum; }
+
+# heading: section title — gum-styled when fancy, bold ANSI otherwise.
+heading() {
+  if fancy; then
+    gum style --bold --foreground 212 "$*"
+  else
+    printf '%s%s%s\n' "$BOLD" "$*" "$RESET"
+  fi
+}
+
+# pick_snapshot: interactive snapshot picker via gum. Prints the kopia
+# root-object id (field 4 of `snapshot list`, == rootEntry.obj) on stdout.
+# Caller MUST gate on fancy() (stdout is a pipe inside $(...), so we can't
+# check here) and ensure the repo is connected first. Returns 1 on cancel.
+pick_snapshot() {
+  local lines sel
+  lines="$(kopia snapshot list "$SOURCE" 2>/dev/null | grep -E '^  [0-9]{4}-' || true)"
+  [ -n "$lines" ] || return 1
+  # newest first; gum filter shows the UI on /dev/tty and the pick on stdout
+  sel="$(printf '%s\n' "$lines" | tail -r | gum filter --placeholder 'Snapshot wählen…' --height 15)" || return 1
+  [ -n "$sel" ] || return 1
+  printf '%s' "$sel" | awk '{print $4}'
+}
+
+# render_retention: table of "vorhanden / max" per retention category, with a
+# usage bar. Drives rows from the fixed category list so 0-count categories
+# still show. Counts come from each snapshot's retentionReason tags.
+render_retention() {
+  local snap_json policy_raw
+  snap_json="$(kopia snapshot list "$SOURCE" --json 2>/dev/null || true)"
+  policy_raw="$(kopia policy show "$SOURCE" 2>/dev/null || true)"
+  [ -n "$snap_json" ] || { printf '  (keine Snapshot-Daten)\n'; return; }
+  printf '%s' "$snap_json" | POLICY="$policy_raw" /usr/bin/python3 -c '
+import json, sys, re, os
+from collections import Counter
+
+try:
+    snaps = json.load(sys.stdin)
+except Exception:
+    snaps = []
+
+counts = Counter()
+for s in snaps:
+    for r in (s.get("retentionReason") or []):
+        counts[re.sub(r"-\d+$", "", r)] += 1
+
+maxes = {}
+for line in os.environ.get("POLICY", "").splitlines():
+    m = re.match(r"\s*(Annual|Monthly|Weekly|Daily|Hourly|Latest) snapshots:\s*(\d+)", line)
+    if m:
+        maxes[m.group(1).lower()] = int(m.group(2))
+
+cats = [("annual","Annual"),("monthly","Monthly"),("weekly","Weekly"),
+        ("daily","Daily"),("hourly","Hourly"),("latest","Latest")]
+W = 8
+for key, label in cats:
+    mx = maxes.get(key, 0)
+    act = counts.get(key, 0)
+    if mx > 0:
+        filled = round(min(act, mx) / mx * W)
+        if act > 0:
+            filled = max(1, filled)
+        filled = min(W, filled)
+    else:
+        filled = 0
+    bar = "█" * filled + "░" * (W - filled)
+    note = "  voll" if mx > 0 and act >= mx else ""
+    print(f"  {label:<9} {act:>3} / {mx:<3} {bar}{note}")
+'
+}
+
 load_password() {
   # already in env? respect it.
   if [ -n "${KOPIA_PASSWORD:-}" ]; then
@@ -74,9 +159,91 @@ resolve_snapshot() {
 # --- commands ---------------------------------------------------------------
 
 cmd_status() {
-  ensure_repo_mounted
+  # --tech / -t → klassischer kopia repository status (Format, Encryption, Epoch, …)
+  if [ "${1:-}" = "--tech" ] || [ "${1:-}" = "-t" ]; then
+    ensure_repo_mounted
+    load_password
+    kopia repository status
+    return
+  fi
+
+  init_style
+  local bold="$BOLD" dim="$DIM" reset="$RESET"
+
+  if fancy; then
+    gum style --border rounded --padding "0 2" --foreground 212 --bold "Backup-Status"
+  fi
+
+  # --- Backup-Platte ---
+  if [ ! -d "$REPO_PATH" ]; then
+    printf '%sBackup-Platte:%s  NICHT GEMOUNTET (%s)\n' "$bold" "$reset" "$REPO_PATH"
+    if [ -r "${XDG_STATE_HOME:-$HOME/.local/state}/kopia/last-mounted" ]; then
+      local last_ts last_iso
+      last_ts="$(cat "${XDG_STATE_HOME:-$HOME/.local/state}/kopia/last-mounted")"
+      last_iso="$(date -r "$last_ts" '+%Y-%m-%d %H:%M')"
+      printf '%sLetztes Backup:%s %s\n' "$bold" "$reset" "$last_iso"
+    fi
+    printf '\n%sPlatte "Backups" anschließen, dann erneut prüfen.%s\n' "$dim" "$reset"
+    return 1
+  fi
+
+  local cap avail usage
+  read -r cap avail usage <<<"$(df -h "$REPO_PATH" | awk 'NR==2 {print $2, $4, $5}')"
+  printf '%sBackup-Platte:%s  %s — %s frei von %s (%s belegt)\n' \
+    "$bold" "$reset" "$REPO_PATH" "$avail" "$cap" "$usage"
+
+  # --- Läuft gerade ein Snapshot? ---
+  local snap_pid
+  snap_pid="$(pgrep -f 'kopia snapshot create' 2>/dev/null | head -1 || true)"
+  if [ -n "$snap_pid" ]; then
+    local started
+    started="$(ps -o lstart= -p "$snap_pid" 2>/dev/null | sed 's/^ *//')"
+    printf '%sLäuft gerade:%s   ja — PID %s, seit %s\n' "$bold" "$reset" "$snap_pid" "$started"
+  else
+    printf '%sLäuft gerade:%s   nein\n' "$bold" "$reset"
+  fi
+
   load_password
-  kopia repository status
+  if ! kopia repository status >/dev/null 2>&1; then
+    kopia repository connect filesystem --path="$REPO_PATH" >/dev/null 2>&1 || {
+      printf '\n%sRepo-Verbindung fehlgeschlagen — siehe: backup status --tech%s\n' "$dim" "$reset"
+      return 1
+    }
+  fi
+
+  # --- Snapshots: Anzahl + letzter ---
+  local list
+  list="$(kopia snapshot list "$SOURCE" 2>/dev/null | grep -E '^  [0-9]{4}-' || true)"
+  if [ -z "$list" ]; then
+    printf '\n%sNoch keine Snapshots vorhanden.%s\n' "$dim" "$reset"
+    return 0
+  fi
+
+  local total latest_line latest_ts latest_size
+  total="$(printf '%s\n' "$list" | wc -l | tr -d ' ')"
+  latest_line="$(printf '%s\n' "$list" | tail -1)"
+  latest_ts="$(printf '%s' "$latest_line" | awk '{print $1, $2}')"
+  latest_size="$(printf '%s' "$latest_line" | awk '{print $5, $6}')"
+
+  printf '\n%sLetzter Snapshot:%s %s  (%s)\n' "$bold" "$reset" "$latest_ts" "$latest_size"
+  printf '%sSnapshots total:%s  %s\n' "$bold" "$reset" "$total"
+
+  # --- Letzte 5 ---
+  printf '\n'; heading "Letzte 5:"
+  printf '%s\n' "$list" | tail -5 | awk '{
+    ts=$1" "$2
+    size=$5" "$6
+    # Tags stehen in Klammern am Zeilenende
+    tag=""
+    for (i=NF; i>=1; i--) if ($i ~ /^\(/) { tag=$i; break }
+    printf "  %-22s %-10s  %s\n", ts, size, tag
+  }'
+
+  # --- Retention: vorhanden / max + Auslastung ---
+  printf '\n'; heading "Aufbewahrung (vorhanden / max):"
+  render_retention
+
+  printf '\n%sTechnische Repo-Infos:  backup status --tech%s\n' "$dim" "$reset"
 }
 
 cmd_connect() {
@@ -116,8 +283,15 @@ cmd_sources() {
 
 cmd_mount() {
   ensure_connected
-  local snap="${1:-all}"
+  local snap="${1:-}"
   local mountpoint="${2:-$MOUNT_BASE}"
+  if [ -z "$snap" ]; then
+    if fancy; then
+      snap="$(pick_snapshot)" || snap="all"   # Escape → 'all'
+    else
+      snap="all"
+    fi
+  fi
   mkdir -p "$mountpoint"
   if mount | grep -q " on $mountpoint "; then
     die "already mounted: $mountpoint (use 'backup umount [$mountpoint]')"
@@ -143,16 +317,29 @@ cmd_umount() {
 }
 
 cmd_restore() {
-  [ "$#" -ge 2 ] || die "usage: backup restore <snapshot|latest|path-in-snap> <target-dir>"
+  # Klassisch: beide Argumente gegeben — Verhalten unverändert (inkl. extra kopia args).
+  if [ "$#" -ge 2 ]; then
+    ensure_connected
+    local src="$1" target="$2"; shift 2
+    case "$src" in
+      latest|latest-*) src=$(resolve_snapshot "$src") ;;
+    esac
+    info "restoring $src -> $target"
+    kopia snapshot restore "$src" "$target" "$@"
+    return
+  fi
+  # Interaktiv ergänzen, was fehlt (nur mit gum + TTY).
+  fancy || die "usage: backup restore <snapshot|latest|latest-N|k...> <target-dir>"
   ensure_connected
-  local src="$1" target="$2"; shift 2
+  local src="${1:-}" target=""
+  [ -n "$src" ] || { src="$(pick_snapshot)" || die "abgebrochen"; }
   case "$src" in
-    latest|latest-*)
-      src=$(resolve_snapshot "$src")
-      ;;
+    latest|latest-*) src=$(resolve_snapshot "$src") ;;
   esac
+  target="$(gum input --prompt 'Restore nach: ' --placeholder 'Zielverzeichnis…')" || die "abgebrochen"
+  [ -n "$target" ] || die "kein Zielverzeichnis angegeben"
   info "restoring $src -> $target"
-  kopia snapshot restore "$src" "$target" "$@"
+  kopia snapshot restore "$src" "$target"
 }
 
 cmd_find() {
@@ -165,9 +352,13 @@ cmd_find() {
 }
 
 cmd_show() {
-  [ "$#" -ge 1 ] || die "usage: backup show <snapshot> [sub-path]"
+  local snap=""
+  if [ "$#" -ge 1 ]; then snap="$1"; shift; fi
+  if [ -z "$snap" ] && ! fancy; then
+    die "usage: backup show <snapshot> [sub-path]"
+  fi
   ensure_connected
-  local snap="$1"; shift
+  [ -n "$snap" ] || snap="$(pick_snapshot)" || die "abgebrochen"
   local oid; oid=$(resolve_snapshot "$snap")
   if [ "$#" -gt 0 ]; then
     kopia show "$oid/$1"
@@ -196,17 +387,21 @@ cmd_help() {
 backup - Kopia backup wrapper
 
 Commands:
-  status                       show repository status (auto-loads password)
+  status                       Übersicht: Platte, laufender Snapshot, letzter Snapshot, Retention-Auslastung
+  status --tech                 klassischer kopia repository status (Format, Encryption, Epoch, …)
   connect | disconnect         (re)connect or disconnect repository
   snap [path] [...kopia args]  create snapshot (default: $SOURCE)
   ls [args]                    list snapshots (default: of $SOURCE)
   sources                      list snapshot sources
   mount [snap] [mountpoint]    mount snapshot ('all' = all snaps); default mountpoint: /tmp/kopia-mount
+                               ohne [snap] + gum/TTY: interaktive Auswahl (Escape = 'all')
   umount [mountpoint]          unmount
-  restore <snap> <target>      restore snapshot to target dir
+  restore [snap] [target]      restore snapshot to target dir
                                snap can be 'latest', 'latest-N', or a kopia id (k...)
+                               fehlt snap/target + gum/TTY: interaktive Auswahl
   find <pattern> [snap]        grep filenames in a snapshot (default: latest)
-  show <snap> [sub-path]       ls / cat inside a snapshot
+  show [snap] [sub-path]       ls / cat inside a snapshot
+                               ohne [snap] + gum/TTY: interaktive Auswahl
   policy [target]              show policy
   verify [args]                verify snapshots
   maintenance [args]           run maintenance

@@ -10,7 +10,10 @@ local settings = require("settings")
 -- auch das Menü der App speist.
 --
 -- Die Aufbereitung der Antwort steht in helpers/irrlicht_probe.py; dort ist
--- auch beschrieben, woher die Zuordnung Session → Abo kommt.
+-- auch beschrieben, woher die Zuordnung Session → Abo kommt und warum der
+-- letzte bekannte Stand je Profil zwischengespeichert wird. Gealterte Werte
+-- nennen ihr Alter und verlieren die Ampelfarbe — sie sagen, wie es war,
+-- nicht wie es ist.
 
 local API = "http://127.0.0.1:7837/api/v1"
 local FOCUS = "/Applications/Irrlicht.app/Contents/MacOS/irrlicht-focus"
@@ -151,16 +154,23 @@ local function update()
     })
 
     for i = 1, MAX_LIMIT_ROWS do
-      local profile, minutes, percent, eta =
-        string.match(limits[i] or "", "^L|([%w%-_]+)|(%d+)|(%d+)|(%d+)$")
+      local profile, minutes, percent, eta, age =
+        string.match(limits[i] or "", "^L|([%w%-_]+)|(%d+)|(%d+)|(%d+)|(%d+)$")
       if profile then
         percent = tonumber(percent)
+        age = tonumber(age) or 0
+        -- Solange eine Session des Profils läuft, ist der Wert sekundenaktuell.
+        -- Erst wenn er merklich altert, gehört sein Alter dazu.
+        local caption = profile .. " · " .. (WINDOW_LABEL[minutes] or (minutes .. "m"))
+        if age > 300 then
+          caption = caption .. " · vor " .. human_eta(age)
+        end
         limit_rows[i]:set({
           drawing = true,
-          icon = { string = profile .. " · " .. (WINDOW_LABEL[minutes] or (minutes .. "m")) },
+          icon = { string = caption },
           label = {
             string = percent .. "%  ·  " .. human_eta(tonumber(eta) or 0),
-            color = limit_color(percent),
+            color = age > 300 and colors.grey or limit_color(percent),
           },
         })
       else

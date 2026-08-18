@@ -5,7 +5,7 @@ Liest die Antwort von http://127.0.0.1:7837/api/v1/sessions auf stdin und
 gibt Zeilen aus, die sich in Lua ohne JSON-Parser auswerten lassen:
 
     <working> <waiting> <gesamt>
-    L|<profil>|<fenster-minuten>|<prozent>|<sekunden-bis-reset>
+    L|<profil>|<fenster-minuten>|<prozent>|<sekunden-bis-reset>|<alter-sekunden>
     S|<session-id>|<state>|<projekt>
 
 Die Abo-Limits haengen je Session unter metrics.rate_limit. Zu welchem Abo
@@ -14,66 +14,130 @@ CLAUDE_CONFIG_DIR ihres Prozesses, das `ps eww` liefert (siehe r-tools/ccp:
 jedes Profil hat ein eigenes Config-Verzeichnis). Je Profil gewinnt der
 Eintrag mit dem juengsten sampled_at.
 
-Ein Profil ohne laufende Session taucht nicht auf: die Limits stammen aus
-API-Antworten, ohne Session gibt es keine.
+Limits gibt es nur aus API-Antworten, ein Profil ohne laufende Session
+liefert also keine. Damit die anderen Abos trotzdem sichtbar bleiben, wird
+der letzte bekannte Stand je Profil zwischengespeichert und mit seinem Alter
+ausgegeben. Ist der Reset-Zeitpunkt eines Fensters verstrichen, hat sich das
+Fenster geleert und der gespeicherte Prozentwert ist wertlos -- eine solche
+Zeile faellt weg statt zu luegen.
 """
 
-import sys, json, time, subprocess
+import json
+import os
+import subprocess
+import sys
+import time
 
-try: d = json.load(sys.stdin)
-except Exception: raise SystemExit
+CACHE = os.path.join(
+    os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
+    "sketchybar", "irrlicht-limits.json",
+)
 
-rows, pids = [], []
-for g in (d.get("groups") or []):
-    for a in (g.get("agents") or []):
-        rows.append(a)
-        if a.get("pid"): pids.append(str(a["pid"]))
 
-# CLAUDE_CONFIG_DIR je PID: ein ps-Aufruf fuer alle Sessions
-env_by_pid = {}
-if pids:
+def load_cache():
     try:
-        out = subprocess.run(["ps", "eww", "-o", "pid=,command=", "-p", ",".join(pids)],
-                             capture_output=True, text=True, timeout=3).stdout
-        for line in out.splitlines():
-            parts = line.split()
-            if not parts: continue
-            pid = parts[0]
-            for tok in parts:
-                if tok.startswith("CLAUDE_CONFIG_DIR="):
-                    env_by_pid[pid] = tok.split("=", 1)[1]
+        with open(CACHE) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_cache(data):
+    try:
+        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
+        tmp = CACHE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, CACHE)
     except Exception:
         pass
 
-def profile_of(a):
-    path = env_by_pid.get(str(a.get("pid")), "")
-    if not path: return None
+
+def config_dirs(pids):
+    """CLAUDE_CONFIG_DIR je PID, in einem einzigen ps-Aufruf."""
+    result = {}
+    if not pids:
+        return result
+    try:
+        out = subprocess.run(
+            ["ps", "eww", "-o", "pid=,command=", "-p", ",".join(pids)],
+            capture_output=True, text=True, timeout=3,
+        ).stdout
+    except Exception:
+        return result
+    for line in out.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        for token in parts:
+            if token.startswith("CLAUDE_CONFIG_DIR="):
+                result[parts[0]] = token.split("=", 1)[1]
+                break
+    return result
+
+
+def profile_name(path):
+    """~/.claude -> personal, ~/.claude-work -> work."""
     name = path.rstrip("/").split("/")[-1].lstrip(".")
-    if name == "claude": return "personal"
+    if name == "claude":
+        return "personal"
     return name[len("claude-"):] if name.startswith("claude-") else name
 
-limits = {}
-for a in rows:
-    prof = profile_of(a)
-    rl = (a.get("metrics") or {}).get("rate_limit") or {}
-    if not prof or not rl.get("windows"): continue
-    cur = limits.get(prof)
-    if cur is None or rl.get("sampled_at", 0) > cur[0]:
-        limits[prof] = (rl.get("sampled_at", 0), rl["windows"])
 
-order = {"waiting": 0, "working": 1, "ready": 2}
-rows.sort(key=lambda a: (order.get(a.get("state") or "", 9), a.get("project_name") or ""))
-states = [a.get("state") for a in rows]
-print(states.count("working"), states.count("waiting"), len(rows))
+def main():
+    try:
+        data = json.load(sys.stdin)
+    except Exception:
+        return
 
-now = time.time()
-for prof in sorted(limits):
-    for minutes in (300, 10080):
-        w = next((x for x in limits[prof][1] if x.get("window_minutes") == minutes), None)
-        if w:
-            print("L|%s|%d|%d|%d" % (prof, minutes, round(w.get("used_percent", 0)),
-                                     max(0, w.get("resets_at", 0) - now)))
+    agents = [a for g in (data.get("groups") or []) for a in (g.get("agents") or [])]
+    dirs = config_dirs([str(a["pid"]) for a in agents if a.get("pid")])
 
-for a in rows[:10]:
-    print("S|%s|%s|%s" % (a.get("session_id") or "", a.get("state") or "",
-                          a.get("project_name") or "?"))
+    # Frische Limits je Profil einsammeln und im Cache festhalten.
+    cache = load_cache()
+    changed = False
+    for agent in agents:
+        path = dirs.get(str(agent.get("pid")))
+        limit = (agent.get("metrics") or {}).get("rate_limit") or {}
+        if not path or not limit.get("windows"):
+            continue
+        profile = profile_name(path)
+        sampled = limit.get("sampled_at", 0)
+        if sampled > (cache.get(profile) or {}).get("sampled_at", -1):
+            cache[profile] = {"sampled_at": sampled, "windows": limit["windows"]}
+            changed = True
+    if changed:
+        save_cache(cache)
+
+    order = {"waiting": 0, "working": 1, "ready": 2}
+    agents.sort(key=lambda a: (order.get(a.get("state") or "", 9),
+                               a.get("project_name") or ""))
+    states = [a.get("state") for a in agents]
+    print(states.count("working"), states.count("waiting"), len(agents))
+
+    now = time.time()
+    for profile in sorted(cache):
+        entry = cache[profile] or {}
+        age = max(0, now - entry.get("sampled_at", 0))
+        for minutes in (300, 10080):
+            window = next((w for w in (entry.get("windows") or [])
+                           if w.get("window_minutes") == minutes), None)
+            if not window:
+                continue
+            remaining = window.get("resets_at", 0) - now
+            if remaining <= 0:
+                # Fenster ist seit der Messung durchgelaufen.
+                continue
+            print("L|%s|%d|%d|%d|%d" % (profile, minutes,
+                                        round(window.get("used_percent", 0)),
+                                        remaining, age))
+
+    for agent in agents[:10]:
+        print("S|%s|%s|%s" % (agent.get("session_id") or "",
+                              agent.get("state") or "",
+                              agent.get("project_name") or "?"))
+
+
+if __name__ == "__main__":
+    main()

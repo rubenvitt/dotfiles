@@ -152,6 +152,56 @@ setDefaults() {
   { set +x; } 2>/dev/null
 }
 
+# Function to configure system keyboard shortcuts
+# Modifier-Maske (NSEvent flags):
+#   Cmd     = 1048576 (0x100000)
+#   Shift   =  131072 (0x020000)
+#   Option  =  524288 (0x080000)
+#   Control =  262144 (0x040000)
+# Keycodes: Left=123, Right=124, Down=125, Up=126
+setKeyboardShortcuts() {
+  echo "Configuring system keyboard shortcuts..."
+  set -x
+
+  # Screenshot-Shortcuts deaktivieren
+  #   28 = Save picture of screen as a file       (Cmd+Shift+3)
+  #   29 = Copy picture of screen to clipboard    (Cmd+Ctrl+Shift+3)
+  #   30 = Save picture of selected area as file  (Cmd+Shift+4)
+  #   31 = Copy selected area to clipboard        (Cmd+Ctrl+Shift+4)
+  #  184 = Screenshot and recording options       (Cmd+Shift+5)
+  for id in 28 29 30 31 184; do
+    defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add "$id" \
+      '<dict><key>enabled</key><false/></dict>'
+  done
+
+  # Space links: Ctrl+Left → Option+Ctrl+Left (mod = 524288 + 262144 = 786432)
+  defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 79 \
+    '<dict><key>enabled</key><true/><key>value</key><dict><key>type</key><string>standard</string><key>parameters</key><array><integer>65535</integer><integer>123</integer><integer>786432</integer></array></dict></dict>'
+
+  # Space rechts: Ctrl+Right → Option+Ctrl+Right
+  defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 80 \
+    '<dict><key>enabled</key><true/><key>value</key><dict><key>type</key><string>standard</string><key>parameters</key><array><integer>65535</integer><integer>124</integer><integer>786432</integer></array></dict></dict>'
+
+  # Services-Shortcuts entfernen (key_equivalent leeren — Service bleibt im Menü, nur das Tastenkürzel verschwindet)
+  for service in \
+    "com.apple.Terminal - Open man Page in Terminal - openManPage" \
+    "com.apple.Terminal - Search man Page Index in Terminal - searchManPages" \
+    "com.apple.Stickies - Make Sticky - makeStickyFromTextService" \
+    "com.apple.ChineseTextConverterService - Convert Text from Simplified to Traditional Chinese - convertTextToTraditionalChinese" \
+    "com.apple.ChineseTextConverterService - Convert Text from Traditional to Simplified Chinese - convertTextToSimplifiedChinese"
+  do
+    defaults write pbs NSServicesStatus -dict-add "$service" \
+      '<dict><key>key_equivalent</key><string></string></dict>'
+  done
+
+  { set +x; } 2>/dev/null
+  echo "Keyboard shortcuts configured. Re-login required for full effect."
+  # cfprefsd killen, damit die Änderung beim nächsten Logout nicht überschrieben wird
+  killall cfprefsd 2>/dev/null
+  # Services-Cache aktualisieren
+  /System/Library/CoreServices/pbs -flush 2>/dev/null
+}
+
 # Function to set the computer name
 setComputername() {
   echo "Setting computer name to $computername..."
@@ -204,6 +254,11 @@ manualSoftwareInstall() {
   gum style --foreground 213 --bold 'Backup einrichten?'
   echo "  Wenn die Backup-Platte 'Backups' angeschlossen ist, hier den Bootstrap starten."
   gum confirm "Kopia-Backup-Continuity jetzt einrichten?" && bash /Volumes/Backups/RESTORE-HOWTO/bootstrap.sh
+
+  if [ -d /Volumes/Backups/kopia-r-mac ]; then
+    gum confirm "Kopia-Ignore-Regeln (Photos Library, iCloud-Mirror, Caches…) jetzt anwenden?" \
+      && bash ~/.dotfiles/launchd/kopia-policy.sh
+  fi
 }
 
 # Function to set the default shell
@@ -320,12 +375,14 @@ setupSymlinks() {
   link ~/.dotfiles/r-tools                ~/.local/share/r-tools
 
   # LaunchAgents (das Plist verweist intern auf den Skript-Pfad in ~/.dotfiles/launchd)
-  link ~/.dotfiles/launchd/dev.rubeen.kopia.snapshot.plist  ~/Library/LaunchAgents/dev.rubeen.kopia.snapshot.plist
+  link ~/.dotfiles/launchd/dev.rubeen.kopia.snapshot.plist       ~/Library/LaunchAgents/dev.rubeen.kopia.snapshot.plist
+  link ~/.dotfiles/launchd/dev.rubeen.clean-ica-downloads.plist  ~/Library/LaunchAgents/dev.rubeen.clean-ica-downloads.plist
 }
 
 # Executing functions
 installBrewAndGum
 setDefaults
+setKeyboardShortcuts
 setComputername
 setEnergy
 softwareInstall

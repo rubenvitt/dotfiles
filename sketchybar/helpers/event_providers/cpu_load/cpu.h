@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <string.h>
 
 struct cpu {
   host_t host;
@@ -16,6 +17,10 @@ struct cpu {
 };
 
 static inline void cpu_init(struct cpu* cpu) {
+  // Ohne memset sind user_load/sys_load/total_load beim ersten Durchlauf
+  // (has_prev_load == false) uninitialisierter Stack-Inhalt, der ungefiltert
+  // in die erste Trigger-Nachricht an sketchybar wandert.
+  memset(cpu, 0, sizeof(struct cpu));
   cpu->host = mach_host_self();
   cpu->count = HOST_CPU_LOAD_INFO_COUNT;
   cpu->has_prev_load = false;

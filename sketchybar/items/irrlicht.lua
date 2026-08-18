@@ -27,7 +27,11 @@ local MAX_LIMIT_ROWS = 6   -- drei Profile mal zwei Zeitfenster
 -- Spaltenbreite hängt hinter jeder kurzen Zeile Leerraum an. Nur die beiden
 -- Limit-Spalten sind fest, damit die Prozentwerte untereinander stehen.
 local ROW_FONT = 11.0
-local ROW_HEIGHT = 18
+-- Ausschlaggebend für die Zeilenhöhe im Popup ist popup.height am Eltern-Item:
+-- ohne den Wert (-1) übernimmt jede Zeile die Höhe der Bar, also 40 Punkt.
+-- background.height wirkt nur auf den gezeichneten Hintergrund und ändert am
+-- Zeilenabstand nichts.
+local ROW_HEIGHT = 20
 local ROW_PAD = 0
 local LIMIT_CAPTION_WIDTH = 118
 local LIMIT_VALUE_WIDTH = 78
@@ -78,6 +82,7 @@ local irrlicht = sbar.add("item", "irrlicht", {
   update_freq = 5,
   popup = {
     align = "right",
+    height = ROW_HEIGHT,
     background = {
       border_width = 2,
       border_color = colors.popup.border,
@@ -97,7 +102,6 @@ for i = 1, MAX_LIMIT_ROWS do
     drawing = false,
     padding_left = ROW_PAD,
     padding_right = ROW_PAD,
-    background = { height = ROW_HEIGHT },
     icon = {
       string = "",
       width = LIMIT_CAPTION_WIDTH,
@@ -125,7 +129,6 @@ for i = 1, MAX_ROWS do
     drawing = false,
     padding_left = ROW_PAD,
     padding_right = ROW_PAD,
-    background = { height = ROW_HEIGHT },
     icon = {
       string = "●",
       padding_left = ROW_PAD,

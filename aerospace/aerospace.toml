@@ -63,6 +63,13 @@ exec-on-workspace-change = ['/bin/bash', '-c',
     '/opt/homebrew/bin/sketchybar --trigger aerospace_workspace_change FOCUSED_WORKSPACE=$AEROSPACE_FOCUSED_WORKSPACE'
 ]
 
+# Sketchybar über den Wechsel des Binding-Modus informieren.
+# items/aerospace_mode.lua hört auf dieses Custom-Event.
+# AeroSpace stellt im Callback keine Variable mit dem neuen Modus bereit
+# (per env-Dump geprüft), deshalb die Abfrage — zum Callback-Zeitpunkt ist
+# der Wechsel bereits übernommen.
+on-mode-changed = ['exec-and-forget /opt/homebrew/bin/sketchybar --trigger aerospace_mode_change MODE=$(/opt/homebrew/bin/aerospace list-modes --current)']
+
 # Fenster, die nicht gekachelt werden sollen.
 # Bedingungen in der test-Syntax (`man aerospace-test`); die alte
 # `if.app-id`-Form ist deprecated.

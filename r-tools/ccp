@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# ccp - Claude Code Profil-Switcher (personal/work/innoq)
+set -euo pipefail
+
+# --- Konfiguration: Profil -> Config-Dir ist die einzige Quelle der Zuordnung ---
+STATE_FILE="$HOME/.claude-active-profile"
+DEFAULT_PROFILE="personal"
+PERSONAL_DIR="$HOME/.claude"
+INNOQ_SRC_SETTINGS="$HOME/.claude/settings-innoq.json"
+SHARED_ITEMS=(skills plugins agents commands hooks CLAUDE.md)
+
+usage() {
+  cat <<'EOF'
+ccp - Claude Code Profil-Switcher
+
+  ccp status              Aktives Profil, Config-Dirs und Login-Status
+  ccp list                Profile und ihre Config-Dirs auflisten
+  ccp use <profil>        Globales Default-Profil setzen (nacktes `claude` folgt dem)
+  ccp setup <profil>      Config-Dir anlegen + geteilte Teile verlinken
+  ccp dir [profil]        Config-Dir ausgeben (ohne Arg: aktives Profil)   [intern]
+  ccp active              Namen des aktiven Profils ausgeben               [intern]
+
+Profile: personal (~/.claude), work (~/.claude-work), innoq (~/.claude-innoq)
+Explizite Starter (Fish): claude-personal / claude-work / claude-innoq
+EOF
+}
+
+# Profil -> Config-Dir. Exit 1 bei unbekanntem Profil.
+profile_dir() {
+  case "${1:-}" in
+    personal) printf '%s\n' "$HOME/.claude" ;;
+    work)     printf '%s\n' "$HOME/.claude-work" ;;
+    innoq)    printf '%s\n' "$HOME/.claude-innoq" ;;
+    *)        return 1 ;;
+  esac
+}
+
+valid_profile() { profile_dir "${1:-}" >/dev/null 2>&1; }
+
+# ~/... statt vollem $HOME für die Anzeige
+tildify() {
+  # literales ~ zur Anzeige gewollt, keine Expansion
+  # shellcheck disable=SC2088
+  case "$1" in
+    "$HOME"/*) printf '~/%s\n' "${1#"$HOME"/}" ;;
+    "$HOME")   printf '~\n' ;;
+    *)         printf '%s\n' "$1" ;;
+  esac
+}
+
+active_profile() {
+  local p=""
+  [[ -r "$STATE_FILE" ]] && p="$(tr -d '[:space:]' < "$STATE_FILE" || true)"
+  p="${p:-$DEFAULT_PROFILE}"
+  if valid_profile "$p"; then printf '%s\n' "$p"; else printf '%s\n' "$DEFAULT_PROFILE"; fi
+}
+
+# "eingeloggt", wenn .claude.json einen oauthAccount trägt (Heuristik, kein claude-Aufruf)
+login_state() {
+  local cj="$1/.claude.json"
+  if [[ -r "$cj" ]] && grep -q '"oauthAccount"' "$cj" 2>/dev/null; then
+    printf 'eingeloggt\n'
+  else
+    printf 'nicht eingeloggt\n'
+  fi
+}
+
+require_profile_arg() {
+  if [[ -z "${1:-}" ]]; then
+    echo "ccp: Profil fehlt (personal|work|innoq)" >&2; return 1
+  fi
+  if ! valid_profile "$1"; then
+    echo "ccp: unbekanntes Profil: $1 (personal|work|innoq)" >&2; return 1
+  fi
+}
+
+# Einen geteilten Eintrag idempotent als Symlink anlegen.
+link_item() {
+  local dir="$1" item="$2"
+  local src="$PERSONAL_DIR/$item" dst="$dir/$item"
+  if [[ ! -e "$src" ]]; then
+    echo "  · $item: Quelle fehlt in ~/.claude, überspringe" >&2; return 0
+  fi
+  if [[ -L "$dst" ]]; then
+    if [[ "$(readlink "$dst")" == "$src" ]]; then
+      echo "  ✓ $item"
+    else
+      echo "  ! $item: fremder Symlink ($(readlink "$dst")) — lasse unberührt" >&2
+    fi
+  elif [[ -e "$dst" ]]; then
+    echo "  ! $item: existiert bereits real — lasse unberührt" >&2
+  else
+    ln -s "$src" "$dst" && echo "  + $item → ~/.claude/$item"
+  fi
+}
+
+# INNOQ-settings.json erzeugen: geteilte Personal-Settings + Gateway-Env aus settings-innoq.json.
+# Der Token wird nur aus der (nicht im Git liegenden) settings-innoq.json gelesen
+# und landet ausschliesslich in ~/.claude-innoq/settings.json.
+generate_innoq_settings() {
+  local dst="$1/settings.json"
+  if [[ ! -r "$INNOQ_SRC_SETTINGS" ]]; then
+    echo "  ! settings-innoq.json fehlt ($INNOQ_SRC_SETTINGS) — Gateway-Settings nicht erzeugt" >&2
+    return 1
+  fi
+  python3 - "$PERSONAL_DIR/settings.json" "$INNOQ_SRC_SETTINGS" "$dst" <<'PY'
+import json, sys
+base_path, innoq_path, dst = sys.argv[1:4]
+try:
+    with open(base_path) as f: base = json.load(f)
+except Exception:
+    base = {}
+with open(innoq_path) as f: innoq = json.load(f)
+merged = dict(base)
+env = dict(base.get("env", {}))
+env.update(innoq.get("env", {}))          # INNOQ-Env gewinnt bei Kollision
+merged["env"] = env
+if "model" in innoq:                       # Gateway-Default-Modell übernehmen
+    merged["model"] = innoq["model"]
+with open(dst, "w") as f:
+    json.dump(merged, f, indent=2)
+    f.write("\n")
+PY
+  chmod 600 "$dst"
+  echo "  + settings.json (geteilte Config + INNOQ-Gateway-Env, chmod 600)"
+}
+
+cmd_dir() {
+  local p="${1:-$(active_profile)}"
+  valid_profile "$p" || { echo "ccp: unbekanntes Profil: $p" >&2; return 1; }
+  profile_dir "$p"
+}
+
+cmd_active() { active_profile; }
+
+cmd_list() {
+  local p
+  for p in personal work innoq; do
+    printf '%-10s %s\n' "$p" "$(tildify "$(profile_dir "$p")")"
+  done
+}
+
+cmd_status() {
+  local act p dir status auth
+  act="$(active_profile)"
+  echo "Aktives Profil (nacktes 'claude'): $act"
+  echo
+  printf '%-10s %-20s %-16s %s\n' PROFIL DIR STATUS AUTH
+  for p in personal work innoq; do
+    dir="$(profile_dir "$p")"
+    if [[ "$p" == innoq ]]; then
+      auth="Gateway"
+      [[ -d "$dir" ]] && status="eingerichtet" || status="fehlt"
+    else
+      auth="OAuth"
+      if [[ -d "$dir" ]]; then status="$(login_state "$dir")"; else status="fehlt"; fi
+    fi
+    printf '%-10s %-20s %-16s %s\n' "$p" "$(tildify "$dir")" "$status" "$auth"
+  done
+}
+
+cmd_use() {
+  require_profile_arg "${1:-}"
+  local p="$1" dir
+  dir="$(profile_dir "$p")"
+  if [[ "$p" != personal && ! -d "$dir" ]]; then
+    echo "ccp: '$p' ist noch nicht eingerichtet — zuerst 'ccp setup $p'." >&2; return 1
+  fi
+  printf '%s\n' "$p" > "$STATE_FILE"
+  echo "Aktives Profil: $p  ($(tildify "$dir"))"
+  echo "Neu gestartete 'claude'-Sessions verwenden jetzt $p."
+}
+
+cmd_setup() {
+  require_profile_arg "${1:-}"
+  local p="$1" dir item
+  if [[ "$p" == personal ]]; then
+    echo "personal = dein bestehendes ~/.claude. Kein Setup nötig."
+    return 0
+  fi
+  dir="$(profile_dir "$p")"
+  mkdir -p "$dir"
+  echo "Richte '$p' ein in $(tildify "$dir"):"
+  for item in "${SHARED_ITEMS[@]}"; do
+    link_item "$dir" "$item"
+  done
+  case "$p" in
+    work)
+      link_item "$dir" settings.json
+      echo
+      echo "Nächster Schritt: 'claude-work' starten und mit dem ARBEITS-Account einloggen (/login)."
+      echo "Danach optional 'ccp use work', damit auch nacktes 'claude' work verwendet."
+      ;;
+    innoq)
+      generate_innoq_settings "$dir"
+      echo
+      echo "Fertig — 'claude-innoq' startet direkt über das Gateway (kein Login nötig)."
+      ;;
+  esac
+}
+
+main() {
+  local cmd="${1:-status}"
+  shift || true
+  case "$cmd" in
+    status) cmd_status "$@" ;;
+    list)   cmd_list "$@" ;;
+    use)    cmd_use "$@" ;;
+    setup)  cmd_setup "$@" ;;
+    dir)    cmd_dir "$@" ;;
+    active) cmd_active "$@" ;;
+    -h|--help|help) usage ;;
+    *) echo "ccp: unbekanntes Kommando: $cmd" >&2; echo >&2; usage >&2; return 1 ;;
+  esac
+}
+
+main "$@"

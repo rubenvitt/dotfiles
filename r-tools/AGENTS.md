@@ -11,6 +11,7 @@ r-tools is a collection of bash utility scripts for macOS, part of a larger dotf
 - **r-tools** — Interactive tool launcher/dispatcher. Discovers executables in its directory, extracts descriptions from comments, provides help and a TUI picker via `gum`.
 - **pw** — Secure password generator with concealed macOS clipboard integration (NSPasteboard with ConcealedType), auto-clear timeout, and character requirement enforcement.
 - **rnd** — Random string generator supporting hex, base64, and alphanumeric encodings. Copies to clipboard via `pbcopy`.
+- **ccp** — Claude Code profile switcher. Maps three profiles (`personal`/`work`/`innoq`) to isolated `CLAUDE_CONFIG_DIR`s, symlinks shared workflow config (`skills`, `plugins`, `agents`, `commands`, `hooks`, `CLAUDE.md`, plus `settings.json` for personal↔work), generates an INNOQ-gateway `settings.json`, and tracks the active profile in `~/.claude-active-profile`. Companion fish functions live in `~/.dotfiles/fish/functions/`: the `claude` wrapper follows the active profile, and `claude-personal`/`claude-work`/`claude-innoq` launch a specific one. Two claude processes in the same config dir corrupt `.claude.json`, so each profile gets its own dir and the launchers hold a `.ccp.lock`. Design: `docs/2026-07-14-ccp-design.md`.
 
 ### Adding New Tools
 

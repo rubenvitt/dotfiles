@@ -361,9 +361,8 @@ setupSymlinks() {
   link ~/.dotfiles/jj                     ~/.config/jj
   link ~/.dotfiles/fabric                 ~/.config/fabric
 
-  # Window/Status (yabai/skhd-Stil — falls genutzt)
+  # Window/Status
   link ~/.dotfiles/sketchybar             ~/.config/sketchybar
-  link ~/.dotfiles/skhd                   ~/.config/skhd
 
   # Raycast / Docker
   link ~/.dotfiles/raycast                ~/.config/raycast

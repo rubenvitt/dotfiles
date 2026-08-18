@@ -1,3 +1,4 @@
+tap "nikitabobko/tap"
 tap "remotemobprogramming/brew"
 tap "stacklok/tap"
 tap "steipete/tap"
@@ -84,6 +85,7 @@ brew "yakitrak/yakitrak/obsidian-cli"
 
 cask "1password"
 cask "1password-cli"
+cask "aerospace"
 cask "alt-tab"
 cask "android-platform-tools"
 cask "backblaze"

@@ -1,0 +1,144 @@
+# AeroSpace — i3-artiger Tiling-Window-Manager für macOS (kein SIP-Abschalten nötig).
+# Doku: https://nikitabobko.github.io/AeroSpace/guide
+#
+# Symlink: ~/.config/aerospace/aerospace.toml -> ~/.dotfiles/aerospace/aerospace.toml
+#
+# Modifier-Konzept (deutsche Tastatur!):
+#   Ctrl+Alt          — fokussieren / Workspace wechseln
+#   Ctrl+Alt+Shift    — Fenster mitnehmen
+# Alt allein ist auf DE-Layout tabu: Option+7/8/9/5/6 erzeugen | { } [ ],
+# Option+←/→ springt wortweise, Option+Shift+←/→ markiert wortweise.
+# Die nativen macOS-Space-Shortcuts (Ctrl+←/→) sind in mac-setup.sh deaktiviert,
+# weil AeroSpace die Workspace-Navigation übernimmt.
+
+config-version = 2
+
+start-at-login = true
+auto-reload-config = true
+
+after-startup-command = []
+
+# Normalisierung: verschachtelte Container automatisch aufräumen.
+enable-normalization-flatten-containers = true
+enable-normalization-opposite-orientation-for-nested-containers = true
+
+accordion-padding = 30
+
+default-root-container-layout = 'tiles'
+# 'auto': breite Monitore horizontal, hohe vertikal.
+default-root-container-orientation = 'auto'
+
+# Maus folgt dem Fokus, wenn der Monitor wechselt.
+on-focused-monitor-changed = ['move-mouse monitor-lazy-center']
+
+automatically-unhide-macos-hidden-apps = false
+
+focus-follows-mouse.enabled = false
+
+# Tastennamen beziehen sich auf die physische QWERTY-Position, nicht auf das
+# aktive Layout. Diese Config nutzt nur Pfeile, Ziffern und Buchstaben —
+# damit ist die Layout-Frage irrelevant.
+key-mapping.preset = 'qwerty'
+
+# Nur die Workspaces, die auch gebunden sind.
+persistent-workspaces = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
+
+# Abstände. outer.top später ggf. auf die Sketchybar-Höhe anheben.
+gaps.inner.horizontal = 8
+gaps.inner.vertical   = 8
+gaps.outer.left       = 8
+gaps.outer.bottom     = 8
+gaps.outer.top        = 8
+gaps.outer.right      = 8
+
+# Sketchybar-Anbindung — erst aktivieren, wenn Sketchybar auf AeroSpace umgebaut ist:
+# exec-on-workspace-change = ['/bin/bash', '-c',
+#     'sketchybar --trigger aerospace_workspace_change FOCUSED=$AEROSPACE_FOCUSED_WORKSPACE'
+# ]
+
+# Fenster, die nicht gekachelt werden sollen.
+[[on-window-detected]]
+if.app-id = 'com.apple.systempreferences'
+run = ['layout floating']
+
+[[on-window-detected]]
+if.app-id = 'com.apple.ActivityMonitor'
+run = ['layout floating']
+
+[[on-window-detected]]
+if.app-id = 'com.apple.finder'
+if.window-title-regex-substring = 'Informationen|Info'
+run = ['layout floating']
+
+# ── Haupt-Modus ─────────────────────────────────────────────────────────────
+[mode.main.binding]
+
+    # Fokus bewegen
+    ctrl-alt-left  = 'focus left'
+    ctrl-alt-down  = 'focus down'
+    ctrl-alt-up    = 'focus up'
+    ctrl-alt-right = 'focus right'
+
+    # Fenster verschieben
+    ctrl-alt-shift-left  = 'move left'
+    ctrl-alt-shift-down  = 'move down'
+    ctrl-alt-shift-up    = 'move up'
+    ctrl-alt-shift-right = 'move right'
+
+    # Workspace fokussieren
+    ctrl-alt-1 = 'workspace 1'
+    ctrl-alt-2 = 'workspace 2'
+    ctrl-alt-3 = 'workspace 3'
+    ctrl-alt-4 = 'workspace 4'
+    ctrl-alt-5 = 'workspace 5'
+    ctrl-alt-6 = 'workspace 6'
+    ctrl-alt-7 = 'workspace 7'
+    ctrl-alt-8 = 'workspace 8'
+    ctrl-alt-9 = 'workspace 9'
+
+    # Fenster auf Workspace verschieben (und mitgehen)
+    ctrl-alt-shift-1 = ['move-node-to-workspace 1', 'workspace 1']
+    ctrl-alt-shift-2 = ['move-node-to-workspace 2', 'workspace 2']
+    ctrl-alt-shift-3 = ['move-node-to-workspace 3', 'workspace 3']
+    ctrl-alt-shift-4 = ['move-node-to-workspace 4', 'workspace 4']
+    ctrl-alt-shift-5 = ['move-node-to-workspace 5', 'workspace 5']
+    ctrl-alt-shift-6 = ['move-node-to-workspace 6', 'workspace 6']
+    ctrl-alt-shift-7 = ['move-node-to-workspace 7', 'workspace 7']
+    ctrl-alt-shift-8 = ['move-node-to-workspace 8', 'workspace 8']
+    ctrl-alt-shift-9 = ['move-node-to-workspace 9', 'workspace 9']
+
+    # Zuletzt genutzter Workspace / Workspace auf anderen Monitor
+    ctrl-alt-tab       = 'workspace-back-and-forth'
+    ctrl-alt-shift-tab = 'move-workspace-to-monitor --wrap-around next'
+
+    # Layout
+    ctrl-alt-e     = 'layout tiles horizontal vertical'    # Split-Richtung umschalten
+    ctrl-alt-w     = 'layout accordion horizontal vertical'
+    ctrl-alt-f     = 'fullscreen'
+    ctrl-alt-space = 'layout floating tiling'              # Fenster schweben lassen
+
+    # Modi
+    ctrl-alt-r = 'mode resize'
+    ctrl-alt-s = 'mode service'
+
+# ── Resize-Modus (Ctrl+Alt+R, verlassen mit Esc/Enter) ──────────────────────
+[mode.resize.binding]
+    left  = 'resize width -50'
+    right = 'resize width +50'
+    up    = 'resize height -50'
+    down  = 'resize height +50'
+    b     = 'balance-sizes'
+    esc   = 'mode main'
+    enter = 'mode main'
+
+# ── Service-Modus (Ctrl+Alt+S) ──────────────────────────────────────────────
+[mode.service.binding]
+    esc       = ['reload-config', 'mode main']
+    r         = ['flatten-workspace-tree', 'mode main']   # Layout zurücksetzen
+    f         = ['layout floating tiling', 'mode main']
+    backspace = ['close-all-windows-but-current', 'mode main']
+
+    left  = ['join-with left', 'mode main']
+    down  = ['join-with down', 'mode main']
+    up    = ['join-with up', 'mode main']
+    right = ['join-with right', 'mode main']

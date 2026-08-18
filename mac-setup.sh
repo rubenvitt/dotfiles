@@ -174,13 +174,14 @@ setKeyboardShortcuts() {
       '<dict><key>enabled</key><false/></dict>'
   done
 
-  # Space links: Ctrl+Left → Option+Ctrl+Left (mod = 524288 + 262144 = 786432)
-  defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 79 \
-    '<dict><key>enabled</key><true/><key>value</key><dict><key>type</key><string>standard</string><key>parameters</key><array><integer>65535</integer><integer>123</integer><integer>786432</integer></array></dict></dict>'
-
-  # Space rechts: Ctrl+Right → Option+Ctrl+Right
-  defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add 80 \
-    '<dict><key>enabled</key><true/><key>value</key><dict><key>type</key><string>standard</string><key>parameters</key><array><integer>65535</integer><integer>124</integer><integer>786432</integer></array></dict></dict>'
+  # Native Space-Navigation deaktivieren — AeroSpace übernimmt die Workspaces.
+  #   79 = Move left a space   (Ctrl+Left)
+  #   80 = Move right a space  (Ctrl+Right)
+  # Ohne das kollidiert jede Ctrl+Alt+Pfeil-Bindung von AeroSpace mit macOS.
+  for id in 79 80; do
+    defaults write com.apple.symbolichotkeys AppleSymbolicHotKeys -dict-add "$id" \
+      '<dict><key>enabled</key><false/></dict>'
+  done
 
   # Services-Shortcuts entfernen (key_equivalent leeren — Service bleibt im Menü, nur das Tastenkürzel verschwindet)
   for service in \
@@ -362,6 +363,7 @@ setupSymlinks() {
   link ~/.dotfiles/fabric                 ~/.config/fabric
 
   # Window/Status
+  link ~/.dotfiles/aerospace              ~/.config/aerospace
   link ~/.dotfiles/sketchybar             ~/.config/sketchybar
 
   # Raycast / Docker

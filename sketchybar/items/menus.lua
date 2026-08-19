@@ -11,6 +11,10 @@ local space_menu_swap = sbar.add("item", {
   updates = true,
 })
 sbar.add("event", "swap_menus_and_spaces")
+-- Wer von beiden Ansichten gilt, entscheidet dieses Item; welche Workspaces in
+-- der Spaces-Ansicht sichtbar sind, entscheidet items/spaces.lua. Ein
+-- pauschales drawing=true auf /space\..*/ wuerde dort auch die leeren zeigen.
+sbar.add("event", "spaces_visibility")
 
 local max_items = 15
 local menu_items = {}
@@ -63,11 +67,12 @@ space_menu_swap:subscribe("swap_menus_and_spaces", function(env)
   if drawing then
     menu_watcher:set( { updates = false })
     sbar.set("/menu\\..*/", { drawing = false })
-    sbar.set("/space\\..*/", { drawing = true })
+    sbar.trigger("spaces_visibility", { SPACES = "on" })
     sbar.set("front_app", { drawing = true })
   else
     menu_watcher:set( { updates = true })
     sbar.set("/space\\..*/", { drawing = false })
+    sbar.trigger("spaces_visibility", { SPACES = "off" })
     sbar.set("front_app", { drawing = false })
     update_menus()
   end

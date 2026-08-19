@@ -23,9 +23,23 @@ sbar.add("event", "aerospace_workspace_change")
 
 local spaces = {}
 local brackets = {}
+local paddings = {}
+
+-- Sichtbarkeit: leere Workspaces werden ausgeblendet, der fokussierte immer
+-- gezeigt. Der Stand wird zwischengespeichert, weil items/menus.lua beim
+-- Zurückschalten auf die Spaces-Ansicht pauschal alle space.*-Items einblendet
+-- und wir ihn dann sofort wieder herstellen müssen.
+local visible = {}
+local focused_workspace = nil
+-- Spaces- oder Menü-Ansicht? In der Menü-Ansicht darf hier nichts eingeblendet
+-- werden, sonst schiebt sich bei jedem front_app_switched ein Workspace ins Menü.
+local spaces_shown = true
 
 for _, sid in ipairs(WORKSPACES) do
   local space = sbar.add("item", "space." .. sid, {
+    -- Startet unsichtbar; die erste aerospace-Abfrage blendet ein, was belegt
+    -- ist — sonst blitzen bei jedem Neustart alle neun Workspaces auf.
+    drawing = false,
     icon = {
       font = { family = settings.font.numbers },
       string = sid,
@@ -66,14 +80,28 @@ for _, sid in ipairs(WORKSPACES) do
   })
 
   -- Abstandshalter
-  sbar.add("item", "space.padding." .. sid, {
+  paddings[sid] = sbar.add("item", "space.padding." .. sid, {
+    drawing = false,
     script = "",
     width = settings.group_paddings,
   })
 end
 
+-- Zwischengespeicherten Sichtbarkeitsstand auf die Bar schreiben.
+-- Das Bracket bleibt unangetastet: es enthält nur das eine Workspace-Item und
+-- klappt von selbst weg, sobald das ausgeblendet ist (per --query verifiziert).
+local function apply_visibility()
+  if not spaces_shown then return end
+  for _, sid in ipairs(WORKSPACES) do
+    local on = visible[sid] or false
+    spaces[sid]:set({ drawing = on })
+    paddings[sid]:set({ drawing = on })
+  end
+end
+
 -- Highlight des fokussierten Workspace setzen.
 local function highlight(focused)
+  focused_workspace = focused
   for _, sid in ipairs(WORKSPACES) do
     local selected = (sid == focused)
     spaces[sid]:set({
@@ -85,22 +113,28 @@ local function highlight(focused)
       background = { border_color = selected and colors.grey or colors.bg2 }
     })
   end
+  -- Sofort einblenden, ohne auf die aerospace-Abfrage zu warten: sonst ist die
+  -- Bar beim Wechsel auf einen frischen Workspace kurz ohne Anzeige.
+  if focused then visible[focused] = true end
+  apply_visibility()
 end
 
--- App-Icons je Workspace aus der aktuellen Fensterliste ableiten.
+-- App-Icons und Belegung je Workspace aus der aktuellen Fensterliste ableiten.
+-- Dieselbe Abfrage liefert beides; 'list-workspaces --empty no' wäre ein
+-- zweiter aerospace-Aufruf für eine Information, die hier schon vorliegt.
 local function update_windows()
   sbar.exec(AEROSPACE .. " list-windows --all --format '%{workspace}|%{app-name}'", function(out)
     local per_workspace = {}
     for line in string.gmatch(out or "", "[^\r\n]+") do
       local ws, app = string.match(line, "^(.-)|(.*)$")
-      if ws and app and app ~= "" then
+      if ws then
         local entry = per_workspace[ws]
         if not entry then
           entry = { seen = {}, icons = {} }
           per_workspace[ws] = entry
         end
         -- Jede App nur einmal, Reihenfolge wie von aerospace geliefert
-        if not entry.seen[app] then
+        if app and app ~= "" and not entry.seen[app] then
           entry.seen[app] = true
           table.insert(entry.icons, app_icons[app] or app_icons["default"])
         end
@@ -113,10 +147,15 @@ local function update_windows()
       if entry and #entry.icons > 0 then
         icon_line = " " .. table.concat(entry.icons, " ")
       end
+      -- Belegt zählt am Fenster, nicht am Icon: ein Fenster ohne app-name
+      -- macht den Workspace trotzdem nicht leer.
+      visible[sid] = (entry ~= nil) or (sid == focused_workspace)
       sbar.animate("tanh", 10, function()
         spaces[sid]:set({ label = icon_line })
       end)
     end
+
+    apply_visibility()
   end)
 end
 
@@ -169,6 +208,18 @@ spaces_indicator:subscribe("swap_menus_and_spaces", function(env)
   spaces_indicator:set({
     icon = currently_on and icons.switch.off or icons.switch.on
   })
+end)
+
+-- Welche Ansicht gilt, meldet items/menus.lua -- dort hängt der maßgebliche
+-- Zustand. Auf swap_menus_and_spaces mitzuhören ginge auch, hinge dann aber an
+-- der Reihenfolge zweier Handler am selben Event: menus.lua würde die leeren
+-- Workspaces sichtbar setzen und wir sie je nach Ausgang des Rennens wieder aus.
+space_window_observer:subscribe("spaces_visibility", function(env)
+  spaces_shown = env.SPACES == "on"
+  if spaces_shown then
+    apply_visibility()
+    update_windows()
+  end
 end)
 
 spaces_indicator:subscribe("mouse.entered", function(env)

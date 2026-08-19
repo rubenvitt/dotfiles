@@ -13,3 +13,4 @@ docker/sbom
 config/gh/hosts.yml
 config/configstore/update-notifier-semantic-release-cli.json
 config/configstore/update-notifier-npm.json
+__pycache__

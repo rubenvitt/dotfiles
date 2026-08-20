@@ -9,6 +9,7 @@ sbar.exec("killall network_load >/dev/null; $CONFIG_DIR/helpers/event_providers/
 local popup_width = 250
 
 local wifi_up = sbar.add("item", "widgets.wifi1", {
+  display = settings.primary_display,
   position = "right",
   padding_left = -5,
   width = 0,
@@ -33,6 +34,7 @@ local wifi_up = sbar.add("item", "widgets.wifi1", {
 })
 
 local wifi_down = sbar.add("item", "widgets.wifi2", {
+  display = settings.primary_display,
   position = "right",
   padding_left = -5,
   icon = {
@@ -56,6 +58,7 @@ local wifi_down = sbar.add("item", "widgets.wifi2", {
 })
 
 local wifi = sbar.add("item", "widgets.wifi.padding", {
+  display = settings.primary_display,
   position = "right",
   label = { drawing = false },
 })
@@ -66,11 +69,12 @@ local wifi_bracket = sbar.add("bracket", "widgets.wifi.bracket", {
   wifi_up.name,
   wifi_down.name
 }, {
+  display = settings.primary_display,
   background = { color = colors.bg1 },
   popup = { align = "center", height = 30 }
 })
 
-local ssid = sbar.add("item", {
+local ssid = sbar.add("item", "widgets.wifi.ssid", {
   position = "popup." .. wifi_bracket.name,
   icon = {
     font = {
@@ -85,7 +89,7 @@ local ssid = sbar.add("item", {
       size = 15,
       style = settings.font.style_map["Bold"]
     },
-    max_chars = 18,
+    max_chars = 24,
     string = "????????????",
   },
   background = {
@@ -95,7 +99,7 @@ local ssid = sbar.add("item", {
   }
 })
 
-local hostname = sbar.add("item", {
+local hostname = sbar.add("item", "widgets.wifi.hostname", {
   position = "popup." .. wifi_bracket.name,
   icon = {
     align = "left",
@@ -110,7 +114,7 @@ local hostname = sbar.add("item", {
   }
 })
 
-local ip = sbar.add("item", {
+local ip = sbar.add("item", "widgets.wifi.ip", {
   position = "popup." .. wifi_bracket.name,
   icon = {
     align = "left",
@@ -124,7 +128,7 @@ local ip = sbar.add("item", {
   }
 })
 
-local mask = sbar.add("item", {
+local mask = sbar.add("item", "widgets.wifi.mask", {
   position = "popup." .. wifi_bracket.name,
   icon = {
     align = "left",
@@ -138,7 +142,7 @@ local mask = sbar.add("item", {
   }
 })
 
-local router = sbar.add("item", {
+local router = sbar.add("item", "widgets.wifi.router", {
   position = "popup." .. wifi_bracket.name,
   icon = {
     align = "left",
@@ -152,7 +156,8 @@ local router = sbar.add("item", {
   },
 })
 
-sbar.add("item", { position = "right", width = settings.group_paddings })
+sbar.add("item", {
+  display = settings.primary_display, position = "right", width = settings.group_paddings })
 
 wifi_up:subscribe("network_update", function(env)
   local up_color = (env.upload == "000 Bps") and colors.grey or colors.red
@@ -173,6 +178,25 @@ wifi_up:subscribe("network_update", function(env)
   })
 end)
 
+-- macOS 14+ liefert die SSID nur noch an Prozesse mit Standort-Freigabe;
+-- ipconfig/networksetup/scutil geben sonst "<redacted>" zurueck. system_profiler
+-- kennt den Namen weiterhin, braucht dafuer aber mehrere Sekunden. Deshalb wird
+-- die SSID im Hintergrund bei Netzwerkwechseln geholt und im Popup gecached.
+local SSID_CMD = "system_profiler SPAirPortDataType 2>/dev/null | awk '/Current Network Information:/{getline; gsub(/^ *| *$/, \"\"); sub(/:$/, \"\"); print; exit}'"
+
+local function update_ssid()
+  sbar.exec("ipconfig getifaddr en0", function(addr)
+    if addr:gsub("%s+", "") == "" then
+      ssid:set({ label = "Not connected" })
+      return
+    end
+    sbar.exec(SSID_CMD, function(name)
+      name = name:gsub("%s+$", "")
+      ssid:set({ label = (name == "" or name == "<redacted>") and "Wi-Fi" or name })
+    end)
+  end)
+end
+
 wifi:subscribe({"wifi_change", "system_woke"}, function(env)
   sbar.exec("ipconfig getifaddr en0", function(ip)
     local connected = not (ip == "")
@@ -183,7 +207,10 @@ wifi:subscribe({"wifi_change", "system_woke"}, function(env)
       },
     })
   end)
+  update_ssid()
 end)
+
+update_ssid()
 
 local function hide_details()
   wifi_bracket:set({ popup = { drawing = false } })
@@ -199,9 +226,8 @@ local function toggle_details()
     sbar.exec("ipconfig getifaddr en0", function(result)
       ip:set({ label = result })
     end)
-    sbar.exec("ipconfig getsummary en0 | awk -F ' SSID : '  '/ SSID : / {print $2}'", function(result)
-      ssid:set({ label = result })
-    end)
+    -- SSID nur nachladen, wenn noch nie ermittelt: der Scan dauert Sekunden
+    if ssid:query().label.value == "????????????" then update_ssid() end
     sbar.exec("networksetup -getinfo Wi-Fi | awk -F 'Subnet mask: ' '/^Subnet mask: / {print $2}'", function(result)
       mask:set({ label = result })
     end)

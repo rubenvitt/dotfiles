@@ -159,6 +159,25 @@ local function update_windows()
   end)
 end
 
+-- Jede Bar zeigt nur die Workspaces ihres eigenen Monitors. Als Display-Nummer
+-- taugt allein monitor-appkit-nsscreen-screens-id: aerospace' eigene monitor-id
+-- zaehlt von links nach rechts, sketchybar dagegen nach NSScreen.screens --
+-- bei zwei gleichen Monitoren faellt der Unterschied nur nicht auf.
+-- Die Zuordnung aendert sich auch ohne Monitorwechsel (move-workspace-to-monitor),
+-- deshalb haengt der Aufruf am Workspace-Wechsel und nicht nur an display_change.
+local function update_displays()
+  sbar.exec(AEROSPACE .. " list-workspaces --all --format '%{workspace}|%{monitor-appkit-nsscreen-screens-id}'", function(out)
+    for line in string.gmatch(out or "", "[^\r\n]+") do
+      local sid, display = string.match(line, "^(.-)|%s*(%d+)%s*$")
+      if sid and spaces[sid] then
+        spaces[sid]:set({ display = display })
+        paddings[sid]:set({ display = display })
+        brackets[sid]:set({ display = display })
+      end
+    end
+  end)
+end
+
 local space_window_observer = sbar.add("item", {
   drawing = false,
   updates = true,
@@ -167,6 +186,7 @@ local space_window_observer = sbar.add("item", {
 space_window_observer:subscribe("aerospace_workspace_change", function(env)
   highlight(env.FOCUSED_WORKSPACE)
   update_windows()
+  update_displays()
 end)
 
 -- Fenster wechseln den Workspace auch ohne Workspace-Wechsel (neue Fenster,
@@ -180,6 +200,14 @@ sbar.exec(AEROSPACE .. " list-workspaces --focused", function(out)
   if focused then highlight(focused) end
   update_windows()
 end)
+update_displays()
+
+-- Beim Docken verschieben sich die NSScreen-Indizes. Ein Event dafuer gibt es
+-- nicht: display_change meldet nur den Wechsel des aktiven Displays,
+-- system_woke das Aufwachen -- beides passiert beim Andocken ohnehin.
+-- Der Rest faengt sich ueber aerospace_workspace_change.
+space_window_observer:subscribe("display_change", update_displays)
+space_window_observer:subscribe("system_woke", update_displays)
 
 local spaces_indicator = sbar.add("item", {
   padding_left = -3,

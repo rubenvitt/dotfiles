@@ -74,6 +74,7 @@ end
 -- Zweizeiliges Muster aus wifi.lua: das obere Item ist null Punkt breit und legt
 -- sich über das untere, die y_offsets ziehen die Zeilen auseinander.
 local ram = sbar.add("item", "widgets.memory.ram", {
+  display = settings.primary_display,
   position = "right",
   padding_left = -5,
   width = 0,
@@ -97,6 +98,7 @@ local ram = sbar.add("item", "widgets.memory.ram", {
 })
 
 local disk = sbar.add("item", "widgets.memory.disk", {
+  display = settings.primary_display,
   position = "right",
   padding_left = -5,
   -- Der Plattenplatz ändert sich in Minuten nicht messbar; häufiger zu fragen
@@ -123,6 +125,7 @@ local disk = sbar.add("item", "widgets.memory.disk", {
 -- Linker Innenrand des Brackets: die beiden Zeilen ziehen sich mit
 -- padding_left = -5 nach links und stünden sonst am Hintergrundrand.
 local pad = sbar.add("item", "widgets.memory.padding", {
+  display = settings.primary_display,
   position = "right",
   width = 6,
   padding_left = 0,
@@ -137,11 +140,13 @@ local bracket = sbar.add("bracket", "widgets.memory.bracket", {
   ram.name,
   disk.name,
 }, {
+  display = settings.primary_display,
   background = { color = colors.bg1 },
   popup = { align = "center", height = ROW_HEIGHT },
 })
 
 sbar.add("item", "widgets.memory.group_padding", {
+  display = settings.primary_display,
   position = "right",
   width = settings.group_paddings,
 })

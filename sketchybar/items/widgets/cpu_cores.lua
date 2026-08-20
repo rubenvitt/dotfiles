@@ -93,6 +93,7 @@ end
 local members = {}
 
 local trailing = sbar.add("item", "widgets.cpu_cores.trailing", {
+  display = settings.primary_display,
   position = "right",
   width = 6,
   padding_left = 0,
@@ -108,6 +109,7 @@ members[#members + 1] = trailing.name
 -- Mittelwert ueber alle Kerne ist dieselbe Groesse, die host_statistics als
 -- total_load liefert -- ein zweiter Event-Provider dafuer waere unnoetig.
 local total = sbar.add("item", "widgets.cpu_cores.total", {
+  display = settings.primary_display,
   position = "right",
   icon = { drawing = false },
   label = {
@@ -140,6 +142,7 @@ for index = CORE_COUNT - 1, 0, -1 do
   local name = "widgets.cpu_cores.core." .. index
 
   bars[index] = sbar.add("item", name, {
+  display = settings.primary_display,
     position = "right",
     width = BAR_WIDTH + gap,
     padding_left = 0,
@@ -162,6 +165,7 @@ for index = CORE_COUNT - 1, 0, -1 do
 end
 
 local cpu_cores = sbar.add("item", "widgets.cpu_cores", {
+  display = settings.primary_display,
   position = "right",
   icon = {
     string = icons.cpu,
@@ -217,6 +221,7 @@ cpu_cores:subscribe("cpu_cores_update", function(env)
 end)
 
 local bracket = sbar.add("bracket", "widgets.cpu_cores.bracket", members, {
+  display = settings.primary_display,
   background = { color = colors.bg1 },
   popup = { align = "right", height = ROW_HEIGHT },
 })
@@ -342,6 +347,7 @@ for _, bar in pairs(bars) do
 end
 
 sbar.add("item", "widgets.cpu_cores.padding", {
+  display = settings.primary_display,
   position = "right",
   width = settings.group_paddings,
 })

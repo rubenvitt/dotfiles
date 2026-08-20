@@ -1,10 +1,12 @@
 local icons = require("icons")
 local colors = require("colors")
+local settings = require("settings")
 
 local whitelist = { ["Spotify"] = true,
                     ["Music"] = true    };
 
 local media_cover = sbar.add("item", {
+  display = settings.primary_display,
   position = "right",
   background = {
     image = {
@@ -24,6 +26,7 @@ local media_cover = sbar.add("item", {
 })
 
 local media_artist = sbar.add("item", {
+  display = settings.primary_display,
   position = "right",
   drawing = false,
   padding_left = 3,
@@ -40,6 +43,7 @@ local media_artist = sbar.add("item", {
 })
 
 local media_title = sbar.add("item", {
+  display = settings.primary_display,
   position = "right",
   drawing = false,
   padding_left = 3,

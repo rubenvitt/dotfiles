@@ -58,6 +58,7 @@ local STATE_COLOR = {
 }
 
 local clickup = sbar.add("item", "clickup", {
+  display = settings.primary_display,
   position = "right",
   -- Startet unsichtbar: der erste Abruf laeuft asynchron an, und solange er
   -- nicht geantwortet hat, gibt es nichts zu zeigen.

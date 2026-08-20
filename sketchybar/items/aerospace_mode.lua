@@ -17,6 +17,7 @@ local AEROSPACE = "/opt/homebrew/bin/aerospace"
 sbar.add("event", "aerospace_mode_change")
 
 local mode = sbar.add("item", "aerospace_mode", {
+  display = settings.primary_display,
   position = "left",
   -- default.lua setzt updates = "when_shown"; damit würde das Item nach dem
   -- ersten drawing = false keine Events mehr bekommen und nie zurückkommen.

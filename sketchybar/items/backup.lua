@@ -82,6 +82,7 @@ local function age_color(days)
 end
 
 local backup = sbar.add("item", "backup", {
+  display = settings.primary_display,
   position = "right",
   -- default.lua setzt updates = "when_shown"; ohne diese Zeile bekäme das Item
   -- nach dem ersten drawing = false keine Events mehr und käme nie zurück.

@@ -20,6 +20,7 @@ local max_items = 15
 local menu_items = {}
 for i = 1, max_items, 1 do
   local menu = sbar.add("item", "menu." .. i, {
+  display = "active",
     padding_left = settings.paddings,
     padding_right = settings.paddings,
     drawing = false,
@@ -38,10 +39,12 @@ for i = 1, max_items, 1 do
 end
 
 sbar.add("bracket", { '/menu\\..*/' }, {
+  display = "active",
   background = { color = colors.bg1 }
 })
 
 local menu_padding = sbar.add("item", "menu.padding", {
+  display = "active",
   drawing = false,
   width = 5
 })

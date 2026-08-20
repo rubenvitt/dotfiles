@@ -25,7 +25,7 @@ local MAX_LIMIT_ROWS = 8   -- drei ccp-Profile mal zwei Fenster, plus andere Ada
 --
 -- Die Session-Zeilen bekommen bewusst keine feste Breite: eine erzwungene
 -- Spaltenbreite hängt hinter jeder kurzen Zeile Leerraum an. Nur die beiden
--- Limit-Spalten sind fest, damit die Prozentwerte untereinander stehen.
+-- Limit-Spalten sind fest, damit die Zahlen untereinander stehen.
 local ROW_FONT = 11.0
 -- Ausschlaggebend für die Zeilenhöhe im Popup ist popup.height am Eltern-Item:
 -- ohne den Wert (-1) übernimmt jede Zeile die Höhe der Bar, also 40 Punkt.
@@ -35,8 +35,19 @@ local ROW_HEIGHT = 20
 -- Randabstand der Zeilen zum Popup-Rahmen. Wirkt links wie rechts, weil
 -- Icon-Polster und Label-Polster denselben Wert verwenden.
 local ROW_PAD = 7
-local LIMIT_CAPTION_WIDTH = 118
-local LIMIT_VALUE_WIDTH = 78
+-- Breit genug fuer den laengsten Fall mit Altersangabe: "gemini-cli · Woche
+-- (5d)" misst 123px, ein Abo am Namensdeckel von zehn Zeichen 136px (SF Pro
+-- 11, CoreText). Eine Zeichenzahl garantiert in einer Proportionalschrift
+-- keine Breite -- der Deckel in irrlicht_probe.py haelt reale Adapternamen
+-- klein, gegen konstruierte Extremfaelle hilft er nicht.
+local LIMIT_CAPTION_WIDTH = 138
+-- Ist der Text breiter als die Spalte, schneidet sketchybar ihn nicht ab,
+-- sondern zeichnet ihn über den Nachbarn. Die Werte-Spalte muss deshalb den
+-- laengsten moeglichen Eintrag fassen. Gemessen in SF Mono 11 (CoreText):
+-- "100% · 6d 23h" = 89px; ein Anbieter mit laengerem Fenster als einer Woche
+-- braucht mehr ("100% · 13d 23h" ≈ 96px), und laut irrlicht_probe.py ist die
+-- Fensterlaenge nicht vorgegeben. 104 laesst dafuer Luft.
+local LIMIT_VALUE_WIDTH = 104
 
 local PROBE = "curl -s --max-time 3 " .. API ..
   "/sessions | /usr/bin/python3 $CONFIG_DIR/helpers/irrlicht_probe.py"
@@ -70,6 +81,14 @@ local function limit_color(percent)
   return colors.green
 end
 
+-- Nur die groebste Einheit -- fuer das Alter eines Wertes reicht die
+-- Groessenordnung, und die Beschriftungsspalte hat kein Platz fuer mehr.
+local function coarse_eta(seconds)
+  if seconds >= 86400 then return math.floor(seconds / 86400) .. "d" end
+  if seconds >= 3600 then return math.floor(seconds / 3600) .. "h" end
+  return math.max(0, math.floor(seconds / 60)) .. "m"
+end
+
 -- Restzeit knapp halten: Tage, Stunden oder Minuten, nie alles zusammen.
 local function human_eta(seconds)
   if seconds >= 86400 then
@@ -81,6 +100,7 @@ local function human_eta(seconds)
 end
 
 local irrlicht = sbar.add("item", "irrlicht", {
+  display = settings.primary_display,
   position = "right",
   icon = {
     string = "􀫥",
@@ -207,7 +227,7 @@ local function update()
         -- Erst wenn er merklich altert, gehört sein Alter dazu.
         local caption = profile .. " · " .. window_label(minutes)
         if age > 300 then
-          caption = caption .. " · vor " .. human_eta(age)
+          caption = caption .. " (" .. coarse_eta(age) .. ")"
         end
         limit_rows[i]:set({
           drawing = true,

@@ -103,6 +103,8 @@ cask "chatgpt"
 cask "claude"
 cask "cleanshot"
 cask "clickup"
+# Standort fuer das Wetter-Widget der Bar, siehe sketchybar/helpers/weather_probe.py
+cask "corelocationcli"
 cask "craft"
 cask "daisydisk"
 cask "drawio"

@@ -6,8 +6,8 @@ local settings = require("settings")
 --
 -- Der Nutzer arbeitet als Berater an wechselnden Orten, ein fest eingetragener
 -- Ort waere also falsch -- und in einem oeffentlichen Repo obendrein ein
--- Datenleck. Der Standort wird deshalb zur Laufzeit ueber die IP bestimmt und
--- ausserhalb des Repos zwischengespeichert.
+-- Datenleck. Der Standort wird deshalb zur Laufzeit ueber die Ortungsdienste
+-- bestimmt und ausserhalb des Repos zwischengespeichert.
 --
 -- Wie die Daten geholt und gecacht werden, steht in helpers/weather_probe.py;
 -- dort ist auch begruendet, warum der Standort deutlich laenger gilt als das
@@ -108,6 +108,7 @@ local function human_age(seconds)
 end
 
 local weather = sbar.add("item", "weather", {
+  display = settings.primary_display,
   position = "right",
   -- default.lua setzt updates = "when_shown". Dieses Item blendet sich ohne
   -- Daten selbst aus und bekaeme danach nie wieder einen Durchlauf.
@@ -183,15 +184,18 @@ for i = 1, FORECAST_ROWS do
   forecast_rows[i] = add_row("forecast." .. i, settings.font.numbers)
 end
 
-local function update()
-  sbar.exec(PROBE, function(out)
-    local current, place, day, hours = nil, nil, nil, {}
+-- relocate laesst den Helfer den Standort neu bestimmen statt seinen Cache zu
+-- benutzen. Genau dafuer ist system_woke da: zwischen Zuklappen und Aufklappen
+-- liegt der Ortswechsel, den die Frist im Helfer sonst verschweigen wuerde.
+local function update(relocate)
+  sbar.exec(relocate and (PROBE .. " --relocate") or PROBE, function(out)
+    local current, place, origin, day, hours = nil, nil, nil, nil, {}
     for line in string.gmatch(out or "", "[^\r\n]+") do
       local tag = string.sub(line, 1, 1)
       if tag == "W" then
         current = line
       elseif tag == "O" then
-        place = string.match(line, "^O|(.+)$")
+        origin, place = string.match(line, "^O|(%a+)|(.+)$")
       elseif tag == "D" then
         day = line
       elseif tag == "H" then
@@ -222,13 +226,20 @@ local function update()
       label = { string = temp .. "°", color = color },
     })
 
+    -- Ein Ort aus der Geo-IP-Rueckfallebene ist die Adresse des Providers und
+    -- kann Hunderte Kilometer danebenliegen; das Zeichen sagt, dass hier
+    -- geraten und nicht gemessen wurde. Gemessene Orte bleiben unmarkiert --
+    -- der Normalfall braucht keine Beschriftung.
+    local shown = place or "unbekannt"
+    if place and origin == "ip" then shown = "≈ " .. place end
+
     place_row:set({
       drawing = place ~= nil or stale,
       icon = { string = "Ort" },
       label = {
         -- Der Ortsname stammt aus einer fremden Antwort und landet nur hier,
         -- nie in einem click_script.
-        string = place or "unbekannt",
+        string = shown,
         color = value_color,
       },
     })
@@ -290,6 +301,9 @@ local function update()
   end)
 end
 
-weather:subscribe({ "routine", "forced", "system_woke" }, update)
+-- Zwei Abonnements statt eines mit env.SENDER: welches Ereignis den Durchlauf
+-- ausgeloest hat, steht damit im Code und nicht in einer Zeichenkette.
+weather:subscribe({ "routine", "forced" }, function() update(false) end)
+weather:subscribe("system_woke", function() update(true) end)
 
-update()
+update(false)

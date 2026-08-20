@@ -47,14 +47,20 @@ key-mapping.preset = 'qwerty'
 # Nur die Workspaces, die auch gebunden sind.
 persistent-workspaces = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
 
-# Abstände. outer.top bleibt bei 8: AeroSpace kachelt ohnehin nur in den
-# sichtbaren Bereich unterhalb der Menüleiste, und die Sketchybar liegt
-# darüber — ein zusätzlicher Bar-Höhen-Offset zählt doppelt.
+# Abstände. outer.top ist monitorabhängig, weil die macOS-Menüleiste
+# ausgeblendet ist (_HIHideMenuBar) und der nutzbare Bereich damit direkt
+# am oberen Rand beginnt:
+#   built-in: der Notch-Bereich zählt ohnehin nicht zur nutzbaren Fläche,
+#             die 40px hohe Sketchybar liegt komplett darin → nur der
+#             normale 8er-Rand.
+#   extern:   dort gibt es keinen Notch, also Bar-Höhe (40) + 8 = 48,
+#             sonst verschwinden die Fenster hinter der Sketchybar.
+# Der letzte Eintrag der Liste ist der Default für alle übrigen Monitore.
 gaps.inner.horizontal = 8
 gaps.inner.vertical   = 8
 gaps.outer.left       = 8
 gaps.outer.bottom     = 8
-gaps.outer.top        = 8
+gaps.outer.top        = [{ monitor.'built-in' = 8 }, 48]
 gaps.outer.right      = 8
 
 # Sketchybar über den Workspace-Wechsel informieren.
@@ -73,12 +79,39 @@ on-mode-changed = ['exec-and-forget /opt/homebrew/bin/sketchybar --trigger aeros
 # Fenster, die nicht gekachelt werden sollen.
 # Bedingungen in der test-Syntax (`man aerospace-test`); die alte
 # `if.app-id`-Form ist deprecated.
+# Feste Workspace-Verteilung auf zwei Monitore: 1-5 links, 6-9 rechts.
+# Die Zahl ist die Sequenznummer von links nach rechts, nicht die Display-ID --
+# bei zwei baugleichen PA279CRV taugt der Monitorname nicht als Muster, und
+# 'secondary' ist nur fuer den Zwei-Monitor-Fall definiert.
+# Am Schreibtisch laeuft der Laptop im Clamshell-Modus, unterwegs gibt es nur
+# einen Monitor: fehlt der zugewiesene, landet der Workspace auf dem
+# Hauptmonitor (mit einer Zuweisung auf einen nicht existierenden Monitor
+# gegengeprueft) — unterwegs bleiben also alle neun erreichbar.
+# Achtung: ctrl-alt-shift-tab (move-workspace-to-monitor) ist fuer die
+# Workspaces 1-9 damit wirkungslos, eine Zuweisung schlaegt den Befehl.
+# Wer den Befehl behalten will, nimmt die betreffenden Zeilen hier raus.
+[workspace-to-monitor-force-assignment]
+1 = 1
+2 = 1
+3 = 1
+4 = 1
+5 = 1
+6 = 2
+7 = 2
+8 = 2
+9 = 2
+
 [[on-window-detected]]
 if = 'test %{app-bundle-id} = com.apple.systempreferences'
 run = ['layout floating']
 
 [[on-window-detected]]
 if = 'test %{app-bundle-id} = com.apple.ActivityMonitor'
+run = ['layout floating']
+
+# Parallels: VM-Fenster bleiben schwebend, damit Aerospace sie nicht kachelt
+[[on-window-detected]]
+if = 'test %{app-bundle-id} = com.parallels.desktop.console'
 run = ['layout floating']
 
 # ── Haupt-Modus ─────────────────────────────────────────────────────────────

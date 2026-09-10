@@ -221,6 +221,13 @@ print(name)
 # eingerichtet ist. Funnel wird mitgelesen, weil es der eine Zustand ist, den
 # niemand versehentlich bemerken darf: er stellt den Alarmendpunkt ins
 # oeffentliche Internet.
+#
+# AllowFunnel kommt je nach Tailscale-Fassung als Wahrheitswert oder als
+# Abbildung Host:Port -> bool. Beide Formen werden gedeutet, und bei der
+# Abbildung zaehlt nur ein echtes true: ein abgeschaltetes Funnel hinterlaesst
+# mitunter einen Eintrag mit false, und eine Warnung, die dann anschlaegt,
+# waere nach dem zweiten Mal Tapete. Auf diesem Tailnet ist Funnel gar nicht
+# freigeschaltet, die Form also nicht beobachtbar — deshalb beide.
 serve_summary() {
   tailscale_cli serve status --json | "$PYTHON" -c '
 import json, sys
@@ -237,7 +244,11 @@ for host, entry in sorted((data.get("Web") or {}).items()):
     backend = handler.get("Proxy", "")
     if backend:
         break
-if data.get("AllowFunnel"):
+allowed = data.get("AllowFunnel")
+if isinstance(allowed, dict):
+    if any(allowed.values()):
+        funnel = "ja"
+elif allowed:
     funnel = "ja"
 print("{}\t{}".format(backend, funnel))
 ' 2>/dev/null || true

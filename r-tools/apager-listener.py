@@ -15,6 +15,8 @@ import re
 import subprocess
 import threading
 from collections import namedtuple
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler
 
 # Tailscale vergibt aus dem CGNAT-Bereich; die IPv6-Adressen stammen aus dem
 # festen ULA-Praefix des Dienstes.
@@ -196,3 +198,109 @@ class AlarmDisplay:
                 return  # ersetzt, nicht quittiert
             self._alarms = []
             self._proc = None
+
+
+MAX_BODY_BYTES = 64 * 1024
+
+
+def readable_request(method, path, headers_text, body_bytes):
+    """Was im Dialog steht, solange das Feldmapping noch nicht existiert.
+
+    Das Payload-Format von aPager ist nicht konfigurierbar und derzeit
+    unbekannt. Bis der erste echte Alarm im Protokoll steht, zeigen wir alles
+    Lesbare — lieber zu viel als das falsche Feld.
+
+    method und headers_text werden noch nicht ausgewertet, stehen aber bewusst
+    schon in der Signatur: sobald das Feldmapping kommt, entscheidet der
+    Content-Type darueber, ob der Body als JSON, als Formulardaten oder als
+    Klartext zu lesen ist.
+    """
+    body = body_bytes.decode("utf-8", errors="replace").strip()
+    parts = []
+    if body:
+        parts.append(body)
+    query = path.split("?", 1)[1] if "?" in path else ""
+    if query:
+        parts.append(query)
+    if not parts:
+        parts.append("(kein Inhalt)")
+    return "\n".join(parts)
+
+
+def raw_request_record(method, path, headers_text, body_bytes, received_at):
+    """Der vollstaendige Eintrag fuer alarms.log."""
+    body = body_bytes.decode("utf-8", errors="replace")
+    return (
+        "===== {} =====\n{} {}\n{}\n{}\n".format(
+            received_at.isoformat(timespec="seconds"),
+            method,
+            path,
+            headers_text.rstrip(),
+            body,
+        )
+    )
+
+
+def make_handler(token, display, alarm_log, allow_source=is_tailnet_ip, on_event=None):
+    """Baut die Handler-Klasse. Alles Veraenderliche kommt ueber Closures herein,
+    damit der Handler ohne globalen Zustand testbar bleibt."""
+    notify = on_event or (lambda message: None)
+
+    class AlarmHandler(BaseHTTPRequestHandler):
+        server_version = "apager"
+        sys_version = ""
+
+        def do_GET(self):
+            self._handle("GET")
+
+        def do_POST(self):
+            self._handle("POST")
+
+        def log_message(self, fmt, *args):
+            # Der eingebaute Zugriffslog schreibt nach stderr und damit in die
+            # listener.log; wir protokollieren selbst, was zaehlt.
+            pass
+
+        def _reject(self, reason):
+            notify("abgewiesen: {} ({} {})".format(reason, self.command, self.path))
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def _handle(self, method):
+            source = self.client_address[0]
+            if not allow_source(source):
+                self._reject("Quelle ausserhalb des Tailnets")
+                return
+            if not token_matches(self.path, token):
+                self._reject("Token stimmt nicht")
+                return
+
+            length = int(self.headers.get("Content-Length") or 0)
+            body = self.rfile.read(min(length, MAX_BODY_BYTES)) if length else b""
+
+            received_at = datetime.now()
+            headers_text = str(self.headers)
+
+            # Erst protokollieren, dann anzeigen: ein Fehler in der Darstellung
+            # darf keinen Einsatz verschlucken.
+            try:
+                alarm_log.parent.mkdir(parents=True, exist_ok=True)
+                with alarm_log.open("a", encoding="utf-8") as handle:
+                    handle.write(
+                        raw_request_record(method, self.path, headers_text, body, received_at)
+                    )
+            except OSError as exc:
+                notify("alarms.log nicht schreibbar: {}".format(exc))
+
+            self.send_response(200)
+            self.send_header("Content-Length", "3")
+            self.end_headers()
+            self.wfile.write(b"ok\n")
+
+            try:
+                display.add(Alarm(received_at, readable_request(method, self.path, headers_text, body)))
+            except Exception as exc:
+                notify("Anzeige fehlgeschlagen: {}".format(exc))
+
+    return AlarmHandler

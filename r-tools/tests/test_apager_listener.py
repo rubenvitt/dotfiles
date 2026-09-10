@@ -1,10 +1,13 @@
 """Tests fuer die reinen Hilfsfunktionen von apager-listener.py."""
 
+import http.client
 import importlib.util
 import pathlib
+import tempfile
 import time
 import unittest
 from datetime import datetime
+from http.server import ThreadingHTTPServer
 
 # Der Bindestrich im Dateinamen verbietet den normalen Import.
 _PATH = pathlib.Path(__file__).resolve().parent.parent / "apager-listener.py"
@@ -239,6 +242,136 @@ class TestAlarmDisplay(unittest.TestCase):
         self.assertEqual(len(results), 1)
         self.assertIsInstance(results[0][0], OSError)
         self.assertEqual(len(results[0][1]), 1)
+
+
+class TestHandler(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.alarm_log = pathlib.Path(self.tmp.name) / "alarms.log"
+        self.shown = []
+
+        class RecordingDisplay:
+            def __init__(inner):
+                inner.alarms = []
+
+            def add(inner, alarm):
+                inner.alarms.append(alarm)
+                self.shown.append(alarm)
+
+        self.display = RecordingDisplay()
+        self.events = []
+
+        # allow_source ist im Test immer wahr: der Testserver haengt an
+        # 127.0.0.1, und die echte Herkunftspruefung hat eigene Tests.
+        handler = listener.make_handler(
+            token="geheim",
+            display=self.display,
+            alarm_log=self.alarm_log,
+            allow_source=lambda ip: True,
+            on_event=self.events.append,
+        )
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.addCleanup(self.server.server_close)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.shutdown)
+        self.port = self.server.server_address[1]
+
+    def _request(self, method, path, body=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn.request(method, path, body=body)
+        response = conn.getresponse()
+        response.read()
+        conn.close()
+        return response.status
+
+    def test_post_with_correct_token_is_accepted(self):
+        status = self._request("POST", "/alarm/geheim", body="B2 Wohnungsbrand")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(self.shown), 1)
+        self.assertIn("B2 Wohnungsbrand", self.shown[0].text)
+
+    def test_get_with_correct_token_is_accepted(self):
+        # Ob aPager GET oder POST schickt, ist unbekannt — beides muss gehen.
+        status = self._request("GET", "/alarm/geheim?stichwort=B2")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(self.shown), 1)
+        self.assertIn("stichwort=B2", self.shown[0].text)
+
+    def test_wrong_token_is_rejected_and_shows_nothing(self):
+        status = self._request("POST", "/alarm/falsch", body="egal")
+        self.assertEqual(status, 404)
+        self.assertEqual(self.shown, [])
+
+    def test_other_paths_are_rejected(self):
+        self.assertEqual(self._request("GET", "/"), 404)
+        self.assertEqual(self.shown, [])
+
+    def test_alarm_is_logged_before_it_is_shown(self):
+        self._request("POST", "/alarm/geheim", body="B2 Wohnungsbrand")
+        written = self.alarm_log.read_text(encoding="utf-8")
+        self.assertIn("B2 Wohnungsbrand", written)
+        self.assertIn("POST /alarm/geheim", written)
+
+    def test_rejected_request_is_noted_as_an_event(self):
+        self._request("POST", "/alarm/falsch", body="egal")
+        self.assertTrue(any("abgewiesen" in e for e in self.events))
+
+    def test_a_failing_display_still_logs_the_alarm(self):
+        class BrokenDisplay:
+            def add(inner, alarm):
+                raise RuntimeError("kaputt")
+
+        handler = listener.make_handler(
+            token="geheim",
+            display=BrokenDisplay(),
+            alarm_log=self.alarm_log,
+            allow_source=lambda ip: True,
+            on_event=self.events.append,
+        )
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.addCleanup(server.server_close)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+        conn.request("POST", "/alarm/geheim", body="B2 Wohnungsbrand")
+        response = conn.getresponse()
+        response.read()
+        conn.close()
+
+        self.assertIn("B2 Wohnungsbrand", self.alarm_log.read_text(encoding="utf-8"))
+
+    def test_undecodable_body_does_not_crash(self):
+        status = self._request("POST", "/alarm/geheim", body=b"\xff\xfe kaputt")
+        self.assertEqual(status, 200)
+        self.assertEqual(len(self.shown), 1)
+
+
+class TestSourceCheck(unittest.TestCase):
+    def test_handler_rejects_sources_outside_the_tailnet(self):
+        # Der Vorgabewert von allow_source ist is_tailnet_ip; ein Testserver
+        # auf 127.0.0.1 muss damit abgewiesen werden.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        events = []
+        handler = listener.make_handler(
+            token="geheim",
+            display=None,
+            alarm_log=pathlib.Path(tmp.name) / "alarms.log",
+            on_event=events.append,
+        )
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.addCleanup(server.server_close)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+        conn.request("POST", "/alarm/geheim", body="egal")
+        response = conn.getresponse()
+        response.read()
+        conn.close()
+        self.assertEqual(response.status, 404)
 
 
 if __name__ == "__main__":

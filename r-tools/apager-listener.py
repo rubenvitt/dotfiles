@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 # apager-listener - nimmt aPager-Webhooks aus dem Tailnet entgegen und zeigt sie an
 """Listener fuer aPager-Alarme.
 
@@ -12,6 +12,7 @@ Siehe docs/2026-09-10-apager-design.md.
 import hmac
 import ipaddress
 import logging
+import os
 import pathlib
 import re
 import signal
@@ -31,9 +32,17 @@ TAILNET_V6 = ipaddress.ip_network("fd7a:115c:a1e0::/48")
 # Absolut, weil launchd einen minimalen PATH setzt.
 IFCONFIG = "/sbin/ifconfig"
 
+# Tailscale legt auf macOS immer ein utun-Interface an — der App-Store-Build
+# ueber eine Netzwerkerweiterung ebenso wie der eigenstaendige Daemon.
+TAILSCALE_IFACE = "utun"
+
 Alarm = namedtuple("Alarm", "received_at text")
 
-_INET_RE = re.compile(r"^\s*inet (\d+\.\d+\.\d+\.\d+)", re.MULTILINE)
+# Eine Interface-Zeile beginnt in Spalte 0 ("en0: flags=..."), eine
+# Adresszeile ist eingerueckt. Das Leerzeichen hinter "inet" haelt "inet6"
+# heraus.
+_IFACE_RE = re.compile(r"^([^\s:]+):")
+_INET_RE = re.compile(r"^\s+inet (\d+\.\d+\.\d+\.\d+)\b")
 
 
 def is_tailnet_ip(addr):
@@ -48,12 +57,39 @@ def is_tailnet_ip(addr):
 
 
 def parse_ifconfig_addresses(text):
-    """Alle IPv4-Adressen einer ifconfig-Ausgabe, in Reihenfolge des Auftretens."""
-    return _INET_RE.findall(text)
+    """(Interface, IPv4-Adresse) je Adresse, in Reihenfolge des Auftretens.
+
+    Das Interface gehoert zwingend dazu: die Adresse allein sagt nicht, ob sie
+    von Tailscale stammt — siehe tailnet_address().
+    """
+    pairs = []
+    iface = ""
+    for line in text.splitlines():
+        head = _IFACE_RE.match(line)
+        if head:
+            iface = head.group(1)
+            continue
+        addr = _INET_RE.match(line)
+        if addr:
+            pairs.append((iface, addr.group(1)))
+    return pairs
 
 
 def tailnet_address(ifconfig_output=None):
     """Die eigene Tailscale-Adresse, oder None wenn Tailscale gerade nicht laeuft.
+
+    Es zaehlt nur eine Tailnet-Adresse auf einem utun-Interface, und das ist
+    keine Kosmetik: 100.64.0.0/10 ist der CGNAT-Bereich der Mobilfunkanbieter.
+    Tethert der Mac ueber einen Carrier, der CGNAT einsetzt, traegt en0 eine
+    Adresse aus genau diesem Bereich — und steht in der ifconfig-Ausgabe vor
+    utun. Wer die erste passende Adresse nimmt, bindet den Listener dann ans
+    Mobilfunk-Interface: der Alarm vom Handy laeuft ins Leere, waehrend
+    "status" gebunden und verbunden meldet. Genau die Lage, in der jemand sich
+    auf das Ding verlaesst.
+
+    Deshalb lieber gar nicht binden als falsch. Findet sich keine Adresse auf
+    utun, wartet der Listener — "keine Tailscale-Adresse" ist eine sichtbare
+    Aussage, ein falsches Interface ist keine.
 
     Bewusst ueber ifconfig statt ueber das tailscale-CLI: der App-Store-Build
     blockiert dessen Aufrufe gelegentlich minutenlang, und ein blockierender
@@ -70,8 +106,8 @@ def tailnet_address(ifconfig_output=None):
             ).stdout
         except (OSError, subprocess.SubprocessError):
             return None
-    for addr in parse_ifconfig_addresses(ifconfig_output):
-        if is_tailnet_ip(addr):
+    for iface, addr in parse_ifconfig_addresses(ifconfig_output):
+        if iface.startswith(TAILSCALE_IFACE) and is_tailnet_ip(addr):
             return addr
     return None
 
@@ -90,13 +126,42 @@ def token_from_path(path):
 
 
 def token_matches(path, expected):
-    """Zeitkonstanter Vergleich. Ein leeres erwartetes Token passt auf nichts."""
+    """Zeitkonstanter Vergleich. Ein leeres erwartetes Token passt auf nichts.
+
+    Verglichen wird ueber Bytes, nicht ueber str: compare_digest wirft bei
+    einem str mit einem Zeichen ab U+0080 einen TypeError. http.server
+    dekodiert die Requestzeile als latin-1, ein einziges Byte >= 0x80 im Pfad
+    erzeugt also genau so einen str — und die Ausnahme fiele aus dem Handler
+    heraus, ohne Antwort an den Absender und ohne Spur im alarms.log. latin-1
+    bildet exakt zurueck, was http.server dekodiert hat.
+    """
     if not expected:
         return False
     got = token_from_path(path)
     if got is None:
         return False
-    return hmac.compare_digest(got, expected)
+    return hmac.compare_digest(
+        got.encode("latin-1", "replace"), expected.encode("utf-8")
+    )
+
+
+def redact_path(path):
+    """Der Pfad fuers listener.log, ohne das Token.
+
+    Im Pfad steht das Geheimnis — aPager laesst keine eigenen Header zu. Das
+    listener.log wird von "apager status" und "apager logs --listener"
+    vorgelesen und landet damit in Ausgaben, die jemand weiterreicht, wenn er
+    fragt, warum nichts ankommt. Welcher Pfad getroffen wurde, bleibt
+    erkennbar: eine Sonde auf /favicon.ico sieht anders aus als ein echter
+    aPager-Request mit falschem Token.
+
+    Das alarms.log behaelt den vollstaendigen Pfad: es ist die Vorlage fuer
+    das spaetere Feldmapping und liegt nicht in Terminalausgaben.
+    """
+    if token_from_path(path) is None:
+        return path
+    _, _, query = path.partition("?")
+    return "/alarm/<token>" + ("?" + query if query else "")
 
 
 def format_alarms(alarms):
@@ -207,6 +272,61 @@ class AlarmDisplay:
 
 MAX_BODY_BYTES = 64 * 1024
 
+# Wie viel vom lesbaren Inhalt im Dialog landet. Das Payload-Format ist
+# unbekannt; ein grosser JSON-Blob zoege sonst eine Textwand auf und schoebe
+# die Adresse aus dem Fenster. Vollstaendig steht alles im alarms.log.
+DIALOG_MAX_CHARS = 2000
+
+# Eine Chunk-Groessenzeile ist ein paar Bytes lang. Der Deckel verhindert, dass
+# ein Absender ohne Zeilenumbruch beliebig viel Speicher belegt.
+CHUNK_LINE_MAX = 1024
+
+
+class BadFraming(Exception):
+    """Der Rahmen der Anfrage ist unbrauchbar.
+
+    Sie wird dann ganz verworfen statt zur Haelfte gelesen: hier ist nicht die
+    Herkunft oder das Token das Problem, sondern die Anfrage selbst.
+    """
+
+
+def _read_chunked(rfile, limit):
+    """Liest einen chunked gerahmten Body und gibt (bytes, status) zurueck.
+
+    status ist "ok", "gekappt" (limit erreicht) oder "kaputt" (Rahmen nicht
+    deutbar). Ein kaputter Rahmen fuehrt nie zu einer Ausnahme und nie zu
+    einem Weiterlesen — was bis dahin ankam, ist der Rueckgabewert. Der
+    Aufrufer entscheidet, ob das noch ein Alarm ist.
+    """
+    body = bytearray()
+    while True:
+        line = rfile.readline(CHUNK_LINE_MAX + 1)
+        if not line or len(line) > CHUNK_LINE_MAX:
+            return bytes(body), "kaputt"
+        try:
+            # Hinter der Groesse duerfen Chunk-Erweiterungen stehen: "1a;foo=bar".
+            size = int(line.split(b";", 1)[0].strip(), 16)
+        except ValueError:
+            return bytes(body), "kaputt"
+        if size < 0:
+            return bytes(body), "kaputt"
+        if size == 0:
+            break
+        chunk = rfile.read(size)
+        if len(chunk) < size:
+            return bytes(body), "kaputt"
+        body.extend(chunk[: max(0, limit - len(body))])
+        if len(body) >= limit:
+            return bytes(body), "gekappt"
+        if rfile.readline(CHUNK_LINE_MAX + 1) not in (b"\r\n", b"\n"):
+            return bytes(body), "kaputt"
+    # Etwaige Trailer bis zur Leerzeile wegwerfen.
+    while True:
+        line = rfile.readline(CHUNK_LINE_MAX + 1)
+        if not line or line in (b"\r\n", b"\n"):
+            break
+    return bytes(body), "ok"
+
 
 def readable_request(method, path, headers_text, body_bytes):
     """Was im Dialog steht, solange das Feldmapping noch nicht existiert.
@@ -229,17 +349,27 @@ def readable_request(method, path, headers_text, body_bytes):
         parts.append(query)
     if not parts:
         parts.append("(kein Inhalt)")
-    return "\n".join(parts)
+    text = "\n".join(parts)
+    if len(text) > DIALOG_MAX_CHARS:
+        text = text[:DIALOG_MAX_CHARS].rstrip() + "\n\n[... gekuerzt, vollstaendig im alarms.log]"
+    return text
 
 
-def raw_request_record(method, path, headers_text, body_bytes, received_at):
-    """Der vollstaendige Eintrag fuer alarms.log."""
+def raw_request_record(method, path, headers_text, body_bytes, received_at, note=""):
+    """Der vollstaendige Eintrag fuer alarms.log.
+
+    note vermerkt einen unvollstaendigen Body direkt unter der Requestzeile.
+    Ohne den Vermerk saehe ein gekappter oder abgerissener Body im Protokoll
+    aus wie ein vollstaendiger — und genau dieses Protokoll ist die Grundlage
+    fuer das spaetere Feldmapping.
+    """
     body = body_bytes.decode("utf-8", errors="replace")
     return (
-        "===== {} =====\n{} {}\n{}\n{}\n".format(
+        "===== {} =====\n{} {}\n{}{}\n{}\n".format(
             received_at.isoformat(timespec="seconds"),
             method,
             path,
+            "[{}]\n".format(note) if note else "",
             headers_text.rstrip(),
             body,
         )
@@ -278,6 +408,10 @@ def make_handler(token, display, alarm_log, allow_source=is_tailnet_ip, on_event
         server_version = "apager"
         sys_version = ""
 
+        # Ein Absender, der die Verbindung offen haelt und nichts mehr schickt,
+        # wuerde einen Handler-Thread sonst dauerhaft binden.
+        timeout = 10
+
         def do_GET(self):
             self._handle("GET")
 
@@ -290,12 +424,74 @@ def make_handler(token, display, alarm_log, allow_source=is_tailnet_ip, on_event
             pass
 
         def _reject(self, reason, status=404):
-            notify("abgewiesen: {} ({} {})".format(reason, self.command, self.path))
+            notify("abgewiesen: {} ({} {})".format(reason, self.command, redact_path(self.path)))
+            self._responded = True
             self.send_response(status)
             self.send_header("Content-Length", "0")
             self.end_headers()
 
         def _handle(self, method):
+            """Faengt alles, was aus _dispatch herausfaellt.
+
+            Das eigentliche Fehlerbild dieses Werkzeugs ist nicht der Absturz,
+            sondern der Alarm, der spurlos verschwindet. Eine Ausnahme aus dem
+            Handler landet in socketserver.handle_error, deren Traceback in
+            einer Datei steht, die kein Befehl vorliest — der Absender bekommt
+            nichts, das alarms.log bleibt leer, und niemand erfaehrt davon.
+            Dieser Block schliesst diese Fehlerklasse strukturell: was hier
+            hereinfaellt, wird protokolliert, und der Absender bekommt eine
+            Antwort.
+            """
+            self._responded = False
+            try:
+                self._dispatch(method)
+            except Exception as exc:
+                notify("Anfrage fehlgeschlagen: {!r} ({} {})".format(exc, method, redact_path(self.path)))
+                self._answer_with_failure()
+
+        def _answer_with_failure(self):
+            # Nur wenn noch nichts hinausging: sonst haenge man eine zweite
+            # Statuszeile an eine bereits gesendete Antwort.
+            if self._responded:
+                return
+            try:
+                self._responded = True
+                self.send_response(500)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+            except OSError:
+                pass  # Verbindung schon weg — mehr ist hier nicht zu tun.
+
+        def _read_body(self):
+            """(bytes, Vermerk) — Vermerk ist leer, wenn der Body vollstaendig ist."""
+            encoding = self.headers.get("Transfer-Encoding", "").strip().lower()
+            if encoding:
+                if "chunked" not in encoding:
+                    raise BadFraming("Transfer-Encoding nicht unterstuetzt")
+                body, status = _read_chunked(self.rfile, MAX_BODY_BYTES)
+                if status == "kaputt":
+                    # Der Rest des Streams ist nicht mehr zu deuten; die
+                    # Verbindung darf nicht wiederverwendet werden.
+                    self.close_connection = True
+                    if not body:
+                        raise BadFraming("chunked-Body unlesbar")
+                    return body, "chunked-Body unvollstaendig — Rahmen kaputt"
+                if status == "gekappt":
+                    self.close_connection = True
+                    return body, "Body bei {} Bytes gekappt".format(MAX_BODY_BYTES)
+                return body, ""
+
+            length = _parse_content_length(self.headers)
+            if length is None:
+                raise BadFraming("Content-Length ungueltig")
+            if length > MAX_BODY_BYTES:
+                self.close_connection = True
+                return self.rfile.read(MAX_BODY_BYTES), "Body bei {} Bytes gekappt".format(
+                    MAX_BODY_BYTES
+                )
+            return (self.rfile.read(length) if length else b""), ""
+
+        def _dispatch(self, method):
             source = self.client_address[0]
             if not allow_source(source):
                 self._reject("Quelle ausserhalb des Tailnets")
@@ -304,15 +500,13 @@ def make_handler(token, display, alarm_log, allow_source=is_tailnet_ip, on_event
                 self._reject("Token stimmt nicht")
                 return
 
-            length = _parse_content_length(self.headers)
-            if length is None:
-                # Ein Rahmen, dem man nicht traut, wird verworfen statt zur
-                # Haelfte gelesen: 400, nicht 404 — hier ist nicht die
-                # Herkunft oder das Token das Problem, sondern die Anfrage
-                # selbst.
-                self._reject("Content-Length ungueltig", status=400)
+            try:
+                body, note = self._read_body()
+            except BadFraming as exc:
+                self._reject(str(exc), status=400)
                 return
-            body = self.rfile.read(min(length, MAX_BODY_BYTES)) if length else b""
+            if note:
+                notify("{} ({} {})".format(note, method, redact_path(self.path)))
 
             received_at = datetime.now()
             headers_text = str(self.headers)
@@ -323,11 +517,14 @@ def make_handler(token, display, alarm_log, allow_source=is_tailnet_ip, on_event
                 alarm_log.parent.mkdir(parents=True, exist_ok=True)
                 with alarm_log.open("a", encoding="utf-8") as handle:
                     handle.write(
-                        raw_request_record(method, self.path, headers_text, body, received_at)
+                        raw_request_record(
+                            method, self.path, headers_text, body, received_at, note
+                        )
                     )
             except OSError as exc:
                 notify("alarms.log nicht schreibbar: {}".format(exc))
 
+            self._responded = True
             self.send_response(200)
             self.send_header("Content-Length", "3")
             self.end_headers()
@@ -380,13 +577,18 @@ def serve(address, port, token, display, alarm_log, bound_file, on_event):
 
     Kehrt zurueck, wenn die Adresse wegfaellt oder sich aendert; die aufrufende
     Schleife sucht dann eine neue. Ein Ausweichen auf 0.0.0.0 findet nie statt.
+
+    Gibt None zurueck, wenn regulaer gebunden war, sonst den OSError vom Bind.
+    Das Protokollieren des Bindfehlers gehoert bewusst dem Aufrufer: nur der
+    sieht ueber die Versuche hinweg, ob sich etwas geaendert hat. Alle fuenf
+    Sekunden "Port belegt" in ein Protokoll zu schreiben, das niemand rotiert,
+    macht die Datei gross und die Meldung wertlos.
     """
     handler = make_handler(token, display, alarm_log, on_event=on_event)
     try:
         httpd = ThreadingHTTPServer((address, port), handler)
     except OSError as exc:
-        on_event("Bind auf {}:{} fehlgeschlagen: {}".format(address, port, exc))
-        return
+        return exc
 
     on_event("gebunden an {}:{}".format(address, port))
     try:
@@ -464,6 +666,10 @@ def main():
     )
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
+    # Das alarms.log enthaelt Einsatzadressen und mitunter Namen. Unter launchd
+    # entstuende es sonst mit dessen umask als 644.
+    os.umask(0o077)
+
     # Bedingungslos, noch vor der Schleife: nur so heisst "die Datei existiert"
     # zuverlaessig "dieser Prozess hat gebunden" statt moeglicherweise "ein
     # frueherer Prozess hat mal gebunden und wurde dann hart beendet".
@@ -485,6 +691,7 @@ def main():
     # Nur bei Zustandswechsel protokollieren. Alle fuenf Sekunden "kein
     # Tailscale" zu schreiben, macht die Datei gross und die Meldung wertlos.
     last_state = None
+    last_bind_error = None
     while True:
         address = tailnet_address()
         if address is None:
@@ -494,7 +701,7 @@ def main():
             time.sleep(RETRY_SECONDS)
             continue
         last_state = "up"
-        serve(
+        bind_error = serve(
             address=address,
             port=port,
             token=token,
@@ -503,6 +710,14 @@ def main():
             bound_file=BOUND_FILE,
             on_event=logging.info,
         )
+        if bind_error is None:
+            last_bind_error = None
+        else:
+            # Dieselbe Zustandswechsel-Regel wie beim Tailscale-Zweig darueber.
+            message = "Bind auf {}:{} fehlgeschlagen: {}".format(address, port, bind_error)
+            if message != last_bind_error:
+                logging.error("%s", message)
+                last_bind_error = message
         time.sleep(RETRY_SECONDS)
 
 

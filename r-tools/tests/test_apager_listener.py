@@ -2,6 +2,7 @@
 
 import http.client
 import importlib.util
+import io
 import pathlib
 import re
 import socket
@@ -38,6 +39,29 @@ en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
 \tinet 192.168.178.42 netmask 0xffffff00 broadcast 192.168.178.255
 """
 
+# Der Fall, um den es geht: 100.64.0.0/10 ist der CGNAT-Bereich der
+# Mobilfunkanbieter. Ein Mac, der ueber einen solchen Carrier tethert, traegt
+# eine Adresse daraus auf en0 — und die steht hier vor der Tailscale-Adresse.
+IFCONFIG_CGNAT_TETHERING = """\
+lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
+\tinet 127.0.0.1 netmask 0xff000000
+en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+\tinet 100.92.7.31 netmask 0xfffffc00 broadcast 100.92.7.255
+utun4: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
+\tinet 100.101.102.103 --> 100.101.102.103 netmask 0xff000000
+\tinet6 fd7a:115c:a1e0::1234 prefixlen 128
+"""
+
+# Getethert, aber Tailscale laeuft nicht. Die CGNAT-Adresse auf en0 ist eine
+# gueltige Tailnet-Adresse und trotzdem die falsche: haengte der Listener
+# daran, lauschte er am Mobilfunk-Interface.
+IFCONFIG_CGNAT_ONLY = """\
+lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
+\tinet 127.0.0.1 netmask 0xff000000
+en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+\tinet 100.92.7.31 netmask 0xfffffc00 broadcast 100.92.7.255
+"""
+
 
 class TestIsTailnetIp(unittest.TestCase):
     def test_tailscale_v4_is_accepted(self):
@@ -70,11 +94,32 @@ class TestTailnetAddress(unittest.TestCase):
     def test_returns_none_when_tailscale_is_down(self):
         self.assertIsNone(listener.tailnet_address(IFCONFIG_NO_TAILSCALE))
 
-    def test_parses_all_v4_addresses_in_order(self):
+    def test_prefers_utun_over_a_cgnat_address_on_en0(self):
+        # Ohne Interface-Pruefung faellt hier die Mobilfunkadresse heraus, und
+        # der Listener lauscht am falschen Interface, waehrend "status" alles
+        # gruen meldet.
+        self.assertEqual(
+            listener.tailnet_address(IFCONFIG_CGNAT_TETHERING), "100.101.102.103"
+        )
+
+    def test_a_cgnat_address_without_tailscale_is_not_used(self):
+        # Lieber gar nicht binden als ans Mobilfunk-Interface: "keine Adresse"
+        # ist eine sichtbare Aussage, ein falsches Interface ist keine.
+        self.assertIsNone(listener.tailnet_address(IFCONFIG_CGNAT_ONLY))
+
+    def test_parses_interface_and_address_pairs_in_order(self):
         self.assertEqual(
             listener.parse_ifconfig_addresses(IFCONFIG_SAMPLE),
-            ["127.0.0.1", "192.168.178.42", "100.101.102.103"],
+            [
+                ("lo0", "127.0.0.1"),
+                ("en0", "192.168.178.42"),
+                ("utun4", "100.101.102.103"),
+            ],
         )
+
+    def test_inet6_lines_are_not_mistaken_for_addresses(self):
+        pairs = listener.parse_ifconfig_addresses(IFCONFIG_SAMPLE)
+        self.assertNotIn("fd7a:115c:a1e0::1234", [addr for _, addr in pairs])
 
 
 class TestToken(unittest.TestCase):
@@ -104,6 +149,32 @@ class TestToken(unittest.TestCase):
         # Eine leere Konfiguration darf nicht in einen offenen Endpunkt kippen.
         self.assertFalse(listener.token_matches("/alarm/", ""))
 
+    def test_non_ascii_token_is_rejected_instead_of_raising(self):
+        # Vorher: hmac.compare_digest wirft bei einem str mit einem Zeichen ab
+        # U+0080 einen TypeError. http.server dekodiert die Requestzeile als
+        # latin-1, ein einziges solches Byte im Pfad genuegte also, um die
+        # Anfrage spurlos verschwinden zu lassen.
+        self.assertFalse(listener.token_matches("/alarm/geheim\xff", "geheim"))
+        self.assertFalse(listener.token_matches("/alarm/äöü", "geheim"))
+
+
+class TestRedactPath(unittest.TestCase):
+    """Das listener.log wird jetzt vorgelesen — das Token darf nicht drinstehen."""
+
+    def test_the_token_is_removed(self):
+        self.assertEqual(listener.redact_path("/alarm/geheim"), "/alarm/<token>")
+
+    def test_the_query_survives(self):
+        self.assertEqual(
+            listener.redact_path("/alarm/geheim?stichwort=B2"),
+            "/alarm/<token>?stichwort=B2",
+        )
+
+    def test_paths_without_a_token_stay_readable(self):
+        # Eine Sonde muss von einem echten aPager-Request unterscheidbar bleiben.
+        self.assertEqual(listener.redact_path("/favicon.ico"), "/favicon.ico")
+        self.assertEqual(listener.redact_path("/"), "/")
+
 
 class TestFormatAlarms(unittest.TestCase):
     def test_single_alarm_carries_time_and_text(self):
@@ -122,6 +193,29 @@ class TestFormatAlarms(unittest.TestCase):
 
     def test_empty_list_yields_empty_string(self):
         self.assertEqual(listener.format_alarms([]), "")
+
+
+class TestDialogLength(unittest.TestCase):
+    def test_a_huge_payload_is_shortened_for_the_dialog(self):
+        # Ein unbekanntes Format kann ein grosser JSON-Blob sein. Ungekuerzt
+        # schoebe der die Adresse aus dem Fenster.
+        body = ("{}".format("x" * 50000)).encode("utf-8")
+        text = listener.readable_request("POST", "/alarm/geheim", "", body)
+        self.assertLess(len(text), listener.DIALOG_MAX_CHARS + 200)
+        self.assertIn("gekuerzt", text)
+
+    def test_a_normal_payload_is_untouched(self):
+        text = listener.readable_request(
+            "POST", "/alarm/geheim", "", b"B2 Wohnungsbrand\nMusterstrasse 12"
+        )
+        self.assertEqual(text, "B2 Wohnungsbrand\nMusterstrasse 12")
+
+    def test_the_full_body_still_reaches_the_log(self):
+        body = b"y" * 50000
+        record = listener.raw_request_record(
+            "POST", "/alarm/geheim", "", body, datetime(2026, 9, 10, 14, 0, 0)
+        )
+        self.assertIn(body.decode("ascii"), record)
 
 
 import threading
@@ -246,7 +340,13 @@ class TestAlarmDisplay(unittest.TestCase):
         self.assertEqual(len(results[0][1]), 1)
 
 
-class TestHandler(unittest.TestCase):
+class _HandlerFixture:
+    """setUp und Hilfsmittel fuer alle Handler-Tests.
+
+    Bewusst kein TestCase: eine Testklasse als Basis einer zweiten liesse
+    deren Tests ein zweites Mal laufen.
+    """
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -287,7 +387,7 @@ class TestHandler(unittest.TestCase):
         conn.close()
         return response.status
 
-    def _raw_request(self, header_lines, body=b""):
+    def _raw_request(self, header_lines, body=b"", path="/alarm/geheim"):
         """Schickt eine Anfrage mit handgesetzten Headern.
 
         http.client berechnet Content-Length selbst und laesst sich nicht
@@ -297,11 +397,13 @@ class TestHandler(unittest.TestCase):
         die ganze Suite zu blockieren.
         """
         with socket.create_connection(("127.0.0.1", self.port), timeout=3) as sock:
-            request = "POST /alarm/geheim HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+            request = "POST {} HTTP/1.1\r\nHost: 127.0.0.1\r\n".format(path)
             for line in header_lines:
                 request += line + "\r\n"
             request += "\r\n"
-            sock.sendall(request.encode("utf-8") + body)
+            # latin-1, weil http.server die Requestzeile genau so dekodiert:
+            # so laesst sich ein einzelnes Byte >= 0x80 im Pfad schicken.
+            sock.sendall(request.encode("latin-1") + body)
             return sock.recv(65536)
 
     @staticmethod
@@ -309,6 +411,8 @@ class TestHandler(unittest.TestCase):
         match = re.match(rb"^HTTP/1\.[01] (\d+) ", raw_response)
         return int(match.group(1)) if match else None
 
+
+class TestHandler(_HandlerFixture, unittest.TestCase):
     def test_post_with_correct_token_is_accepted(self):
         status = self._request("POST", "/alarm/geheim", body="B2 Wohnungsbrand")
         self.assertEqual(status, 200)
@@ -340,6 +444,13 @@ class TestHandler(unittest.TestCase):
     def test_rejected_request_is_noted_as_an_event(self):
         self._request("POST", "/alarm/falsch", body="egal")
         self.assertTrue(any("abgewiesen" in e for e in self.events))
+
+    def test_the_event_does_not_carry_the_token(self):
+        # "status" und "logs --listener" lesen diese Zeilen vor.
+        self._request("POST", "/alarm/geheim-aber-falsch", body="egal")
+        joined = "\n".join(self.events)
+        self.assertNotIn("geheim-aber-falsch", joined)
+        self.assertIn("/alarm/<token>", joined)
 
     def test_a_failing_display_still_logs_the_alarm(self):
         class BrokenDisplay:
@@ -401,6 +512,158 @@ class TestHandler(unittest.TestCase):
         self.assertEqual(self._status_of(response), 200)
         self.assertEqual(len(self.shown), 1)
         self.assertIn("(kein Inhalt)", self.shown[0].text)
+
+    def test_non_ascii_in_the_path_gets_an_answer_and_leaves_a_trace(self):
+        # Vorher: TypeError aus compare_digest, der Absender bekam nichts, im
+        # alarms.log stand nichts, und der Traceback landete in einer Datei,
+        # die kein Befehl vorliest.
+        response = self._raw_request([], path="/alarm/geheim\xff")
+        self.assertEqual(self._status_of(response), 404)
+        self.assertEqual(self.shown, [])
+        self.assertTrue(any("abgewiesen" in e for e in self.events))
+
+    def test_an_unexpected_exception_still_answers_and_is_logged(self):
+        # Der strukturelle Teil: keine Ausnahme aus dem Handler darf mehr
+        # spurlos bleiben, ganz gleich woher sie kommt.
+        def boom(ip):
+            raise RuntimeError("unerwartet")
+
+        handler = listener.make_handler(
+            token="geheim",
+            display=self.display,
+            alarm_log=self.alarm_log,
+            allow_source=boom,
+            on_event=self.events.append,
+        )
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        self.addCleanup(server.server_close)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+
+        with socket.create_connection(
+            ("127.0.0.1", server.server_address[1]), timeout=3
+        ) as sock:
+            sock.sendall(b"POST /alarm/geheim HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+            response = sock.recv(65536)
+
+        self.assertEqual(self._status_of(response), 500)
+        self.assertTrue(any("Anfrage fehlgeschlagen" in e for e in self.events))
+
+
+class TestChunkedBodies(_HandlerFixture, unittest.TestCase):
+    """Chunked ist kein Randfall.
+
+    Android-HTTP-Stacks rahmen chunked, sobald die Laenge beim Absenden noch
+    nicht feststeht, und das Payload-Format von aPager ist per Definition
+    unbekannt. Ohne diesen Zweig lief der Body ins Leere: 200 an das Handy,
+    Header ohne Body im alarms.log, ein Dialog mit "(kein Inhalt)" — und
+    "status" meldete einen letzten Alarm. Der erste echte Alarm ist genau die
+    Vorlage, aus der das Feldmapping entsteht.
+    """
+
+    @staticmethod
+    def _chunks(*pieces):
+        raw = b""
+        for piece in pieces:
+            raw += "{:x}\r\n".format(len(piece)).encode("ascii") + piece + b"\r\n"
+        return raw + b"0\r\n\r\n"
+
+    def test_a_chunked_body_arrives_complete(self):
+        body = self._chunks(b"B2 Wohnungsbrand\n", b"Musterstrasse 12")
+        response = self._raw_request(["Transfer-Encoding: chunked"], body=body)
+        self.assertEqual(self._status_of(response), 200)
+        self.assertEqual(len(self.shown), 1)
+        self.assertIn("B2 Wohnungsbrand", self.shown[0].text)
+        self.assertIn("Musterstrasse 12", self.shown[0].text)
+        self.assertIn("Musterstrasse 12", self.alarm_log.read_text(encoding="utf-8"))
+
+    def test_chunk_extensions_are_tolerated(self):
+        body = b"10;foo=bar\r\nB2 Wohnungsbrand\r\n0\r\n\r\n"
+        response = self._raw_request(["Transfer-Encoding: chunked"], body=body)
+        self.assertEqual(self._status_of(response), 200)
+        self.assertIn("B2 Wohnungsbrand", self.shown[0].text)
+
+    def test_trailers_after_the_last_chunk_are_ignored(self):
+        body = b"5\r\nHALLO\r\n0\r\nX-Spur: egal\r\n\r\n"
+        response = self._raw_request(["Transfer-Encoding: chunked"], body=body)
+        self.assertEqual(self._status_of(response), 200)
+        self.assertIn("HALLO", self.shown[0].text)
+
+    def test_a_malformed_chunk_header_is_rejected_not_hung(self):
+        response = self._raw_request(["Transfer-Encoding: chunked"], body=b"zz\r\nmuell")
+        self.assertEqual(self._status_of(response), 400)
+        self.assertEqual(self.shown, [])
+
+    def test_a_body_that_breaks_midway_keeps_what_arrived(self):
+        # Halb ist mehr als nichts: was ankam, ist ein Alarm. Der Vermerk im
+        # alarms.log haelt fest, dass er unvollstaendig ist — sonst saehe er
+        # dort aus wie ein ganzer.
+        body = b"5\r\nHALLO\r\nzz\r\nmuell"
+        response = self._raw_request(["Transfer-Encoding: chunked"], body=body)
+        self.assertEqual(self._status_of(response), 200)
+        self.assertEqual(len(self.shown), 1)
+        self.assertIn("HALLO", self.shown[0].text)
+        self.assertIn("unvollstaendig", self.alarm_log.read_text(encoding="utf-8"))
+
+    def test_a_chunked_body_is_capped_at_the_limit(self):
+        # Der Ueberschuss bleibt klein: wuerde der Handler bei erreichtem
+        # Deckel aufhoeren zu lesen, waehrend der Client noch viel zu senden
+        # haette, liefe der Test in den Socketpuffer statt in eine Antwort.
+        payload = b"x" * (listener.MAX_BODY_BYTES + 200)
+        response = self._raw_request(
+            ["Transfer-Encoding: chunked"], body=self._chunks(payload)
+        )
+        self.assertEqual(self._status_of(response), 200)
+        self.assertEqual(len(self.shown), 1)
+        self.assertIn("gekappt", self.alarm_log.read_text(encoding="utf-8"))
+
+    def test_an_unsupported_transfer_encoding_is_rejected(self):
+        response = self._raw_request(["Transfer-Encoding: gzip"], body=b"egal")
+        self.assertEqual(self._status_of(response), 400)
+        self.assertEqual(self.shown, [])
+
+
+class TestReadChunked(unittest.TestCase):
+    """_read_chunked ohne Socket — die Rahmenlogik allein."""
+
+    @staticmethod
+    def _reader(raw):
+        return io.BufferedReader(io.BytesIO(raw))
+
+    def test_reads_a_well_formed_body(self):
+        body, status = listener._read_chunked(
+            self._reader(b"5\r\nHALLO\r\n3\r\n123\r\n0\r\n\r\n"), 1024
+        )
+        self.assertEqual(body, b"HALLO123")
+        self.assertEqual(status, "ok")
+
+    def test_reports_a_truncated_stream_instead_of_raising(self):
+        body, status = listener._read_chunked(self._reader(b"5\r\nHAL"), 1024)
+        self.assertEqual(status, "kaputt")
+        self.assertEqual(body, b"")
+
+    def test_reports_a_negative_size_as_broken(self):
+        body, status = listener._read_chunked(self._reader(b"-1\r\nx\r\n"), 1024)
+        self.assertEqual(status, "kaputt")
+
+    def test_an_endless_size_line_does_not_grow_without_bound(self):
+        body, status = listener._read_chunked(
+            self._reader(b"a" * (listener.CHUNK_LINE_MAX + 50)), 1024
+        )
+        self.assertEqual(status, "kaputt")
+        self.assertEqual(body, b"")
+
+    def test_stops_at_the_limit(self):
+        body, status = listener._read_chunked(
+            self._reader(b"a\r\n0123456789\r\n0\r\n\r\n"), 4
+        )
+        self.assertEqual(body, b"0123")
+        self.assertEqual(status, "gekappt")
+
+    def test_a_missing_crlf_after_a_chunk_is_broken(self):
+        body, status = listener._read_chunked(self._reader(b"5\r\nHALLOxx0\r\n\r\n"), 1024)
+        self.assertEqual(status, "kaputt")
+        self.assertEqual(body, b"HALLO")
 
 
 class TestSourceCheck(unittest.TestCase):
@@ -468,6 +731,39 @@ class TestCleanupBoundFile(unittest.TestCase):
         # Kein try/except drumherum noetig: darf auch beim allerersten Start,
         # ohne fruehere bound-Datei, klaglos durchlaufen.
         listener._cleanup_bound_file(pathlib.Path("/nicht/vorhanden/bound"))
+
+
+class TestServeBindFailure(unittest.TestCase):
+    def test_an_occupied_port_is_returned_not_logged_or_raised(self):
+        # serve() protokolliert den Bindfehler nicht selbst: nur der Aufrufer
+        # sieht ueber die Versuche hinweg, ob sich etwas geaendert hat. Sonst
+        # schriebe ein dauerhaft belegter Port alle fuenf Sekunden eine Zeile
+        # in ein Protokoll, das niemand rotiert.
+        blocker = socket.socket()
+        self.addCleanup(blocker.close)
+        blocker.bind(("127.0.0.1", 0))
+        blocker.listen(1)
+
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        bound_file = pathlib.Path(tmp.name) / "bound"
+        events = []
+
+        error = listener.serve(
+            address="127.0.0.1",
+            port=blocker.getsockname()[1],
+            token="geheim",
+            display=None,
+            alarm_log=pathlib.Path(tmp.name) / "alarms.log",
+            bound_file=bound_file,
+            on_event=events.append,
+        )
+
+        self.assertIsInstance(error, OSError)
+        self.assertEqual(events, [])
+        # Eine bound-Datei waere hier die schlimmste Luege: "status" laese sie
+        # als gebundenen Listener vor.
+        self.assertFalse(bound_file.exists())
 
 
 class TestParsePort(unittest.TestCase):

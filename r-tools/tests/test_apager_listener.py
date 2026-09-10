@@ -225,7 +225,8 @@ class TestAlarmDisplay(unittest.TestCase):
         # Lauefe add() in einem separaten Thread, damit der Deadlock sichtbar
         # wird (wenn vorhanden).
         thread = threading.Thread(
-            target=lambda: self.display.add(self._alarm(0, "TEST"))
+            target=lambda: self.display.add(self._alarm(0, "TEST")),
+            daemon=True
         )
         thread.start()
         thread.join(timeout=3)

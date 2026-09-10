@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+# apager - aPager-Alarme aus dem Tailnet auf dem Mac anzeigen
+set -euo pipefail
+
+# Warum es dieses Skript gibt: aPager PRO setzt den Webhook vom Handy ab, nicht
+# von einem Server. Der Mac braucht deshalb keine oeffentliche Erreichbarkeit —
+# ein Listener, der ausschliesslich an die Tailscale-Adresse bindet, genuegt.
+#
+# Der Mac ist Anzeige, nicht Alarmierung: kein Ton, keine Benachrichtigung,
+# kein Wecken. Schlaeft er, verpasst er den Alarm. Alarmiert wird ueber das
+# Handy. Siehe docs/2026-09-10-apager-design.md.
+
+TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
+LISTENER="$TOOLS_DIR/apager-listener.py"
+
+LABEL="email.rubeen.apager"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+SERVICE="gui/$(id -u)/$LABEL"
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/apager"
+CONFIG="$CONFIG_DIR/config"
+STATE_DIR="$HOME/.local/state/apager"
+ALARM_LOG="$STATE_DIR/alarms.log"
+LISTENER_LOG="$STATE_DIR/listener.log"
+BOUND="$STATE_DIR/bound"
+
+# Absolut, weil launchd einen minimalen PATH setzt und dieses Skript die plist
+# schreibt, die davon abhaengt.
+PYTHON="/usr/bin/python3"
+
+usage() {
+  cat <<'EOF'
+apager - aPager-Alarme aus dem Tailnet auf dem Mac anzeigen
+
+  apager install      Config und LaunchAgent anlegen, Listener starten
+  apager uninstall    LaunchAgent entfernen (Config und Protokolle bleiben)
+  apager status       Laeuft der Agent, woran haengt er, wann kam der letzte Alarm
+  apager url          Die URL, die in aPager einzutragen ist
+  apager test         Einen Testalarm ueber das Tailnet schicken
+  apager logs         Die letzten Alarme anzeigen
+  apager logs -f      Dem Protokoll folgen
+  apager -h | --help  Diese Hilfe
+
+Der Mac ist Anzeige, nicht Alarmierung: kein Ton, keine Benachrichtigung, kein
+Wecken. Schlaeft der Rechner, verpasst er den Alarm — alarmiert wird ueber das
+Handy.
+EOF
+}
+
+die() { printf 'apager: %s\n' "$1" >&2; exit 1; }
+
+config_value() {
+  [[ -f "$CONFIG" ]] || return 1
+  sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*$/\1/p" "$CONFIG" | head -1
+}
+
+# Die tatsaechlich gebundene Adresse, nicht die konfigurierte. Genau darin liegt
+# der Unterschied zwischen "sollte laufen" und "laeuft".
+bound_address() { [[ -f "$BOUND" ]] && cat "$BOUND" || true; }
+
+# Ob am Eintrag in $BOUND wirklich etwas horcht. Der Listener loescht die Datei
+# bei SIGTERM und beim Start, aber ein harter Absturz (kill -9, Systemschlaf,
+# was auch immer) kann eine Datei zuruecklassen, die eine tote Adresse
+# beschreibt. "status" darf das nicht als "gebunden" vorlesen — genau dann,
+# wenn jemand nachsieht, ob ein Alarm ankommen wuerde, waere das die Luege,
+# die am meisten schadet.
+#
+# /dev/tcp ist eine Bash-eigene Umleitung, kein externes Programm: kein nc,
+# kein curl noetig, nur ein Verbindungsversuch mit Timeout. Ein abgelehnter
+# oder haengender Connect darf das Skript unter "set -e" nicht beenden,
+# deshalb steht der Aufruf immer in einer Bedingung.
+listener_alive() {
+  local addr="$1"
+  timeout 2 bash -c "echo > /dev/tcp/${addr%:*}/${addr##*:}" 2>/dev/null
+}
+
+do_install() {
+  [[ -f "$LISTENER" ]] || die "apager-listener.py fehlt neben $0"
+
+  mkdir -p "$CONFIG_DIR" "$STATE_DIR"
+  if [[ -f "$CONFIG" ]]; then
+    printf 'Config bleibt: %s\n' "$CONFIG"
+  else
+    local token
+    token="$(openssl rand -hex 16)"
+    umask 077
+    cat > "$CONFIG" <<CONF
+# Von \`apager install\` erzeugt. Siehe docs/apager.conf.example.
+APAGER_PORT="8787"
+APAGER_TOKEN="$token"
+CONF
+    chmod 600 "$CONFIG"
+    printf 'Config angelegt: %s\n' "$CONFIG"
+  fi
+
+  mkdir -p "$(dirname "$PLIST")"
+  cat > "$PLIST" <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>$LABEL</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>$PYTHON</string>
+		<string>$LISTENER</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>$LISTENER_LOG</string>
+	<key>StandardErrorPath</key>
+	<string>$LISTENER_LOG</string>
+</dict>
+</plist>
+PLIST_EOF
+
+  # bootout vor bootstrap: eine bereits geladene Fassung wuerde die neue
+  # sonst mit "service already loaded" abweisen.
+  launchctl bootout "$SERVICE" 2>/dev/null || true
+  launchctl bootstrap "gui/$(id -u)" "$PLIST"
+  printf 'LaunchAgent geladen: %s\n\n' "$LABEL"
+
+  do_url
+}
+
+do_uninstall() {
+  launchctl bootout "$SERVICE" 2>/dev/null || true
+  rm -f "$PLIST"
+  printf 'LaunchAgent entfernt. Config und Protokolle bleiben:\n  %s\n  %s\n' \
+    "$CONFIG" "$ALARM_LOG"
+}
+
+do_url() {
+  local token port bound
+  token="$(config_value APAGER_TOKEN)" || die "keine Config — erst 'apager install'"
+  port="$(config_value APAGER_PORT)"
+  bound="$(bound_address)"
+
+  if [[ -n "$bound" ]] && listener_alive "$bound"; then
+    printf 'In aPager als Ziel eintragen:\n\n  http://%s/alarm/%s\n\n' "$bound" "$token"
+  else
+    if [[ -n "$bound" ]]; then
+      printf 'Veraltete Datei: sie nennt %s, aber dort antwortet niemand.\n' "$bound"
+    else
+      printf 'Der Listener haengt gerade an keiner Adresse (Tailscale aus?).\n'
+    fi
+    printf 'Sobald er gebunden ist, lautet die URL:\n\n  http://<tailscale-adresse>:%s/alarm/%s\n\n' \
+      "$port" "$token"
+  fi
+  printf 'Das Token ist ein Geheimnis: Wer die URL hat, kann Alarme einspeisen.\n'
+}
+
+do_status() {
+  local bound
+
+  if launchctl print "$SERVICE" >/dev/null 2>&1; then
+    printf 'LaunchAgent   geladen (%s)\n' "$LABEL"
+  else
+    printf 'LaunchAgent   NICHT geladen — "apager install" fehlt\n'
+  fi
+
+  bound="$(bound_address)"
+  if [[ -z "$bound" ]]; then
+    printf 'Listener      an keine Adresse gebunden\n'
+  elif listener_alive "$bound"; then
+    printf 'Listener      gebunden an %s\n' "$bound"
+  else
+    printf 'Listener      veraltete Datei (%s) — es antwortet niemand\n' "$bound"
+  fi
+
+  # Ueber ifconfig statt ueber das tailscale-CLI: der App-Store-Build blockiert
+  # dessen Aufrufe gelegentlich minutenlang.
+  local ts
+  ts="$(/sbin/ifconfig -a 2>/dev/null | awk '/inet 100\./ {print $2}' | head -1)"
+  if [[ -n "$ts" ]]; then
+    printf 'Tailscale     verbunden (%s)\n' "$ts"
+  else
+    printf 'Tailscale     keine Adresse — es kommt nichts an\n'
+  fi
+
+  if [[ -s "$ALARM_LOG" ]]; then
+    local last
+    last="$(grep -a '^===== ' "$ALARM_LOG" | tail -1 | tr -d '= ')"
+    printf 'Letzter Alarm %s\n' "$last"
+  else
+    printf 'Letzter Alarm noch keiner\n'
+  fi
+}
+
+do_test() {
+  local bound token
+  bound="$(bound_address)"
+  [[ -n "$bound" ]] || die "der Listener haengt an keiner Adresse — 'apager status' zeigt warum"
+  listener_alive "$bound" \
+    || die "veraltete Datei ($bound) — der Listener antwortet nicht, 'apager status' zeigt warum"
+  token="$(config_value APAGER_TOKEN)" || die "keine Config — erst 'apager install'"
+
+  # Bewusst an die gebundene Tailscale-Adresse und nicht an 127.0.0.1: nur so
+  # laufen Bind, Herkunftspruefung und Tokenvergleich wirklich mit. Ueber
+  # Loopback waere der Test gruen, waehrend genau diese drei kaputt sind.
+  local body
+  body="TESTALARM $(date '+%H:%M:%S')
+Musterstrasse 12, Musterstadt
+Ausgeloest von: apager test"
+
+  printf 'Sende an http://%s/alarm/...\n' "$bound"
+  curl -fsS --max-time 5 -X POST --data-binary "$body" \
+    "http://$bound/alarm/$token" >/dev/null \
+    || die "der Listener hat nicht angenommen — 'apager logs' und $LISTENER_LOG ansehen"
+  printf 'Angenommen. Der Dialog sollte jetzt offen sein.\n'
+}
+
+do_logs() {
+  [[ -f "$ALARM_LOG" ]] || die "noch kein Protokoll: $ALARM_LOG"
+  if [[ "${1:-}" == "-f" ]]; then
+    tail -f "$ALARM_LOG"
+  else
+    tail -40 "$ALARM_LOG"
+  fi
+}
+
+case "${1:-}" in
+  -h|--help|help) usage ;;
+  install)        do_install ;;
+  uninstall)      do_uninstall ;;
+  status)         do_status ;;
+  url)            do_url ;;
+  test)           do_test ;;
+  logs)           shift; do_logs "${1:-}" ;;
+  "")             do_status ;;
+  *)              die "unbekannter Befehl: $1 (siehe --help)" ;;
+esac

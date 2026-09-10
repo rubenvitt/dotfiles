@@ -14,6 +14,9 @@ r-tools is a collection of bash utility scripts for macOS, part of a larger dotf
 - **photobackup** — Complete, year-sorted backup of the iCloud photo library to an external drive. Wraps `osxphotos export` with `--directory "{created.year}"`, `--download-missing --use-photokit` (streams the iCloud-only originals — most of the library when "Optimize Mac Storage" is on), and `--update` for resumable incremental runs. Adds a `caffeinate` wrapper, a background disk-space watchdog that cleanly SIGINTs the export if the boot disk runs low, and timestamped logs/report on the target drive. Design: `docs/2026-07-23-photobackup-design.md`.
 - **ccp** — Claude Code profile switcher. Maps three profiles (`personal`/`work`/`innoq`) to isolated `CLAUDE_CONFIG_DIR`s, symlinks shared workflow config (`skills`, `plugins`, `agents`, `commands`, `hooks`, `CLAUDE.md`, plus `settings.json` for personal↔work), generates an INNOQ-gateway `settings.json`, and tracks the active profile in `~/.claude-active-profile`. Companion fish functions live in `~/.dotfiles/fish/functions/`: the `claude` wrapper follows the active profile, and `claude-personal`/`claude-work`/`claude-innoq` launch a specific one. Two claude processes in the same config dir corrupt `.claude.json`, so each profile gets its own dir and the launchers hold a `.ccp.lock`. Design: `docs/2026-07-14-ccp-design.md`.
 
+- **sbar** — Reloads the sketchybar config and verifies it actually landed. `sketchybar --reload` reports nothing: when the Lua config process stalls, sketchybar keeps running with factory defaults (height 25, zero items) and logs nothing. `sbar` therefore checks two things — `--query bar` returns items, and the `lua .../sketchybarrc` child is alive — and retries once. `sbar status` prints items, config PID, event providers and the system load average; `sbar restart` does a real process restart via `launchctl bootout` → pause → `bootstrap` (only needed for `launchctl setenv` variables, which `--reload` does not pick up).
+- **apager** — Nimmt den Webhook entgegen, den aPager PRO bei einem Einsatzalarm vom Handy absetzt, und zeigt ihn in einem Dialog. Der Listener (`apager-listener.py`, unter launchd) bindet ausschliesslich an die Tailscale-Adresse — nie an `0.0.0.0` —, prüft Quell-IP gegen `100.64.0.0/10` und ein Zufallstoken im Pfad, protokolliert den Rohrequest und startet erst dann die Anzeige. Ein Zweitalarm ersetzt den offenen Dialog durch einen, der beide zeigt. Bewusste Abgrenzung: kein Ton, keine Benachrichtigung, kein Wecken — der Mac ist Anzeige, alarmiert wird über das Handy. Design: `docs/2026-09-10-apager-design.md`.
+
 ### Adding New Tools
 
 Drop an executable bash script into the root directory. The dispatcher discovers it automatically. Use the comment format `# toolname - Description` near the top for auto-extracted descriptions. Provide a `usage()` function with a heredoc for `--help` output.
@@ -31,6 +34,14 @@ Drop an executable bash script into the root directory. The dispatcher discovers
 - **Required**: bash, openssl, `/dev/urandom`, macOS CLI tools (`osascript`, `pbcopy`, `sed`, `tr`, `grep`, `awk`)
 - **Optional**: `gum` (`brew install gum`) for interactive TUI modes
 
-## No Build/Test/Lint
+## Tests
 
-Pure shell scripts — no compilation, no test framework, no CI. Scripts can be validated with `shellcheck`.
+Die Shell-Skripte haben kein Testframework und werden mit `shellcheck` geprüft.
+Einzige Ausnahme ist `apager-listener.py`: dessen reine Funktionen — Adress-
+erkennung, Tokenvergleich, Alarmspeicher, HTTP-Handler — tragen die Prüfungen,
+die im Ernstfall still brechen, und haben deshalb Unit-Tests:
+
+    /usr/bin/python3 -m unittest discover -s tests -v
+
+`unittest` und `/usr/bin/python3` sind bewusst gewählt: keine Installation, kein
+venv, keine mise-Abhängigkeit, die einen LaunchAgent lahmlegen könnte.

@@ -1,0 +1,17 @@
+# apager.conf - Endpunkt fuer die aPager-Alarme.
+#
+# Wird von `apager install` angelegt; diese Datei ist nur die Vorlage.
+# Ziel: ~/.config/apager/config, Modus 0600.
+#
+# Die echte Datei gehoert bewusst NICHT in dieses Repository: es ist
+# oeffentlich, und ein Token, mit dem sich Alarme einspeisen lassen, hat darin
+# nichts zu suchen.
+
+# Port, auf dem der Listener horcht. Nur auf der Tailscale-Adresse erreichbar.
+APAGER_PORT="8787"
+
+# Zufaelliges Geheimnis im URL-Pfad: /alarm/<token>. aPager laesst keine
+# eigenen Header zu, deshalb steht es im Pfad und nicht in einem Header.
+# `apager install` erzeugt es; von Hand ginge es so:
+#   openssl rand -hex 16
+APAGER_TOKEN="hier-ein-zufallswert"

@@ -3,6 +3,8 @@
 import http.client
 import importlib.util
 import pathlib
+import re
+import socket
 import tempfile
 import time
 import unittest
@@ -285,6 +287,28 @@ class TestHandler(unittest.TestCase):
         conn.close()
         return response.status
 
+    def _raw_request(self, header_lines, body=b""):
+        """Schickt eine Anfrage mit handgesetzten Headern.
+
+        http.client berechnet Content-Length selbst und laesst sich nicht
+        dazu bringen, kaputte oder negative Werte zu schicken — genau die
+        Faelle, die hier geprueft werden. Der Socket-Timeout sorgt dafuer,
+        dass ein Haengenbleiben des Handlers den Test scheitern laesst statt
+        die ganze Suite zu blockieren.
+        """
+        with socket.create_connection(("127.0.0.1", self.port), timeout=3) as sock:
+            request = "POST /alarm/geheim HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+            for line in header_lines:
+                request += line + "\r\n"
+            request += "\r\n"
+            sock.sendall(request.encode("utf-8") + body)
+            return sock.recv(65536)
+
+    @staticmethod
+    def _status_of(raw_response):
+        match = re.match(rb"^HTTP/1\.[01] (\d+) ", raw_response)
+        return int(match.group(1)) if match else None
+
     def test_post_with_correct_token_is_accepted(self):
         status = self._request("POST", "/alarm/geheim", body="B2 Wohnungsbrand")
         self.assertEqual(status, 200)
@@ -346,6 +370,37 @@ class TestHandler(unittest.TestCase):
         status = self._request("POST", "/alarm/geheim", body=b"\xff\xfe kaputt")
         self.assertEqual(status, 200)
         self.assertEqual(len(self.shown), 1)
+
+    def test_malformed_content_length_is_rejected_not_crashed(self):
+        # Vorher: int("abc") warf eine unbehandelte ValueError, die aus
+        # do_POST herausfiel und einen Traceback nach stderr schrieb.
+        response = self._raw_request(["Content-Length: abc"])
+        self.assertEqual(self._status_of(response), 400)
+        self.assertEqual(self.shown, [])
+
+    def test_negative_content_length_gets_a_response_instead_of_hanging(self):
+        # Vorher: min(-1, MAX_BODY_BYTES) == -1, und rfile.read(-1) liest bis
+        # zum Verbindungsende statt bis zu einer festen Laenge — der Handler
+        # blockierte, bis der Client den Timeout hier ausloeste.
+        response = self._raw_request(["Content-Length: -1"])
+        self.assertEqual(self._status_of(response), 400)
+        self.assertEqual(self.shown, [])
+
+    def test_oversized_content_length_is_clamped_not_rejected(self):
+        # Eine zu grosse, aber sonst gueltige Laenge ist kein Framing-Fehler:
+        # der Body wird bei MAX_BODY_BYTES gekappt, die Anfrage bleibt gueltig.
+        huge_body = b"x" * (listener.MAX_BODY_BYTES + 1000)
+        response = self._raw_request(
+            ["Content-Length: {}".format(len(huge_body))], body=huge_body
+        )
+        self.assertEqual(self._status_of(response), 200)
+        self.assertEqual(len(self.shown), 1)
+
+    def test_absent_content_length_is_treated_as_empty_body(self):
+        response = self._raw_request([])
+        self.assertEqual(self._status_of(response), 200)
+        self.assertEqual(len(self.shown), 1)
+        self.assertIn("(kein Inhalt)", self.shown[0].text)
 
 
 class TestSourceCheck(unittest.TestCase):

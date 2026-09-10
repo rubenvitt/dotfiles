@@ -241,6 +241,29 @@ def raw_request_record(method, path, headers_text, body_bytes, received_at):
     )
 
 
+def _parse_content_length(headers):
+    """Content-Length robust lesen: 0 wenn er fehlt, None wenn ihm nicht zu
+    trauen ist.
+
+    Ein fehlender Header heisst leerer Body — aPager schickt bei GET keinen.
+    Ein Wert, der keine nichtnegative Zahl ist, macht den Rahmen der Anfrage
+    unbrauchbar: int() wuerde bei Unsinn wie "abc" eine ValueError werfen,
+    und ein negativer Wert wuerde als rfile.read(-1) bei einem
+    BufferedReader "lies bis Verbindungsende" bedeuten und den Handler-Thread
+    blockieren. Beides faengt der Aufrufer ab, statt zu lesen. Ein zu grosser,
+    aber sonst gueltiger Wert ist dagegen kein Framing-Fehler und bleibt
+    unveraendert — dafuer sorgt weiterhin der MAX_BODY_BYTES-Deckel beim Lesen.
+    """
+    raw = headers.get("Content-Length")
+    if raw is None:
+        return 0
+    try:
+        length = int(raw)
+    except ValueError:
+        return None
+    return length if length >= 0 else None
+
+
 def make_handler(token, display, alarm_log, allow_source=is_tailnet_ip, on_event=None):
     """Baut die Handler-Klasse. Alles Veraenderliche kommt ueber Closures herein,
     damit der Handler ohne globalen Zustand testbar bleibt."""
@@ -261,9 +284,9 @@ def make_handler(token, display, alarm_log, allow_source=is_tailnet_ip, on_event
             # listener.log; wir protokollieren selbst, was zaehlt.
             pass
 
-        def _reject(self, reason):
+        def _reject(self, reason, status=404):
             notify("abgewiesen: {} ({} {})".format(reason, self.command, self.path))
-            self.send_response(404)
+            self.send_response(status)
             self.send_header("Content-Length", "0")
             self.end_headers()
 
@@ -276,7 +299,14 @@ def make_handler(token, display, alarm_log, allow_source=is_tailnet_ip, on_event
                 self._reject("Token stimmt nicht")
                 return
 
-            length = int(self.headers.get("Content-Length") or 0)
+            length = _parse_content_length(self.headers)
+            if length is None:
+                # Ein Rahmen, dem man nicht traut, wird verworfen statt zur
+                # Haelfte gelesen: 400, nicht 404 — hier ist nicht die
+                # Herkunft oder das Token das Problem, sondern die Anfrage
+                # selbst.
+                self._reject("Content-Length ungueltig", status=400)
+                return
             body = self.rfile.read(min(length, MAX_BODY_BYTES)) if length else b""
 
             received_at = datetime.now()

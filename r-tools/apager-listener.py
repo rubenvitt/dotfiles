@@ -14,6 +14,7 @@ import ipaddress
 import logging
 import pathlib
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -394,9 +395,12 @@ def serve(address, port, token, display, alarm_log, bound_file, on_event):
     except OSError as exc:
         on_event("bound-Datei nicht schreibbar: {}".format(exc))
 
-    worker = threading.Thread(target=httpd.serve_forever, daemon=True)
-    worker.start()
+    # Start liegt in diesem try, nicht davor: schlaegt er fehl, muss dasselbe
+    # finally httpd wieder schliessen und die bound-Datei aufraeumen statt die
+    # Ausnahme unbehandelt durchzureichen.
     try:
+        worker = threading.Thread(target=httpd.serve_forever, daemon=True)
+        worker.start()
         while True:
             time.sleep(ADDRESS_CHECK_SECONDS)
             if tailnet_address() != address:
@@ -411,6 +415,46 @@ def serve(address, port, token, display, alarm_log, bound_file, on_event):
             pass
 
 
+def _handle_sigterm(signum, frame):
+    """Verwandelt SIGTERM in eine Ausnahme, die serve()s finally durchlaeuft.
+
+    launchd stoppt den Prozess per SIGTERM (bootout, Neuladen, Neustart). Ohne
+    Handler beendet die Standardreaktion den Prozess, ohne den Stack
+    abzuwickeln — die bound-Datei bliebe stehen und wuerde einen toten Listener
+    als lebendig ausweisen. SystemExit laesst das bestehende finally in
+    serve() unveraendert die Aufraeumarbeit erledigen.
+    """
+    raise SystemExit(0)
+
+
+def _cleanup_bound_file(bound_file):
+    """Entfernt eine bound-Datei aus einem frueheren Lauf.
+
+    Ein SIGTERM-Handler hilft nur gegen Signale, die sich fangen lassen —
+    gegen SIGKILL, einen Absturz oder einen Stromausfall nicht. Das Loeschen
+    beim Start macht "diese Datei existiert" wieder zu einer verlaesslichen
+    Aussage ueber den aktuellen Prozess statt einen vergangenen.
+    """
+    try:
+        bound_file.unlink()
+    except OSError:
+        pass
+
+
+def _parse_port(value):
+    """Parst APAGER_PORT und akzeptiert nur einen gueltigen TCP-Port.
+
+    int(...) allein liesse z. B. "99999999" durch; das crasht erst tief in
+    ThreadingHTTPServer(...) mit einem OverflowError, den nichts abfaengt —
+    und mit KeepAlive im LaunchAgent eine Absturzschleife statt einer klaren
+    Fehlermeldung.
+    """
+    port = int(value)
+    if not 1 <= port <= 65535:
+        raise ValueError("Port {} ausserhalb des gueltigen Bereichs".format(port))
+    return port
+
+
 def main():
     logging.basicConfig(
         stream=sys.stderr,
@@ -418,15 +462,22 @@ def main():
         format="%(asctime)s %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
+    # Bedingungslos, noch vor der Schleife: nur so heisst "die Datei existiert"
+    # zuverlaessig "dieser Prozess hat gebunden" statt moeglicherweise "ein
+    # frueherer Prozess hat mal gebunden und wurde dann hart beendet".
+    _cleanup_bound_file(BOUND_FILE)
+
     config = read_config(CONFIG_PATH)
     token = config.get("APAGER_TOKEN", "")
     if not token:
         logging.error("kein APAGER_TOKEN in %s — es wird nichts angenommen", CONFIG_PATH)
         return 1
     try:
-        port = int(config.get("APAGER_PORT", DEFAULT_PORT))
+        port = _parse_port(config.get("APAGER_PORT", DEFAULT_PORT))
     except ValueError:
-        logging.error("APAGER_PORT ist keine Zahl")
+        logging.error("APAGER_PORT ist keine gueltige Portnummer (1-65535)")
         return 1
 
     display = AlarmDisplay(on_error=lambda exc: logging.error("Anzeige: %s", exc))

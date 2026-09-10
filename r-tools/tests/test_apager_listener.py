@@ -455,5 +455,111 @@ class TestReadConfig(unittest.TestCase):
         self.assertEqual(listener.read_config(pathlib.Path("/nicht/vorhanden")), {})
 
 
+class TestCleanupBoundFile(unittest.TestCase):
+    def test_removes_an_existing_file(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        bound_file = pathlib.Path(tmp.name) / "bound"
+        bound_file.write_text("100.64.1.2:8787\n", encoding="utf-8")
+        listener._cleanup_bound_file(bound_file)
+        self.assertFalse(bound_file.exists())
+
+    def test_missing_file_is_not_an_error(self):
+        # Kein try/except drumherum noetig: darf auch beim allerersten Start,
+        # ohne fruehere bound-Datei, klaglos durchlaufen.
+        listener._cleanup_bound_file(pathlib.Path("/nicht/vorhanden/bound"))
+
+
+class TestParsePort(unittest.TestCase):
+    def test_accepts_a_valid_port(self):
+        self.assertEqual(listener._parse_port("8787"), 8787)
+
+    def test_accepts_the_range_boundaries(self):
+        self.assertEqual(listener._parse_port("1"), 1)
+        self.assertEqual(listener._parse_port("65535"), 65535)
+
+    def test_rejects_a_port_above_the_valid_range(self):
+        with self.assertRaises(ValueError):
+            listener._parse_port("99999999")
+
+    def test_rejects_zero(self):
+        with self.assertRaises(ValueError):
+            listener._parse_port("0")
+
+    def test_rejects_non_numeric_values(self):
+        with self.assertRaises(ValueError):
+            listener._parse_port("nicht-numerisch")
+
+
+import signal
+import subprocess
+import sys
+
+
+class TestSigtermCleanup(unittest.TestCase):
+    """Prueft den SIGTERM-Pfad end-to-end in einem echten Subprozess.
+
+    Signal-Handler sind Prozesseigenschaften, kein Thread-lokaler Zustand —
+    "sende SIGTERM an einen Thread in diesem Testprozess" waere kein Test des
+    tatsaechlichen Verhaltens. Ein echter Kindprozess ist deshalb kein
+    Overkill, sondern der einzige ehrliche Weg. Er ruft serve() direkt mit
+    einer festen Adresse auf, nicht main() ueber tailnet_address() — dieser
+    Rechner hat kein laufendes Tailscale, und die SIGTERM-Frage ist unabhaengig
+    davon, welche Adresse gebunden wurde.
+    """
+
+    _HARNESS = """\
+import importlib.util, pathlib, signal
+spec = importlib.util.spec_from_file_location("apager_listener", {listener_path!r})
+listener = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(listener)
+signal.signal(signal.SIGTERM, listener._handle_sigterm)
+bound_file = pathlib.Path({bound_file!r})
+listener.serve(
+    address="127.0.0.1",
+    port=0,
+    token="geheim",
+    display=None,
+    alarm_log=bound_file.parent / "alarms.log",
+    bound_file=bound_file,
+    on_event=lambda msg: None,
+)
+"""
+
+    def test_sigterm_removes_the_bound_file(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        bound_file = pathlib.Path(tmp.name) / "bound"
+        script = pathlib.Path(tmp.name) / "harness.py"
+        script.write_text(
+            self._HARNESS.format(listener_path=str(_PATH), bound_file=str(bound_file)),
+            encoding="utf-8",
+        )
+
+        # Als Kontextmanager: schliesst stdout/stderr zuverlaessig, auch wenn
+        # eine Assertion unten fehlschlaegt — sonst ResourceWarning je Lauf.
+        with subprocess.Popen(
+            [sys.executable, str(script)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        ) as proc:
+            self.addCleanup(lambda: proc.poll() is None and proc.kill())
+
+            deadline = time.time() + 5
+            while not bound_file.exists() and time.time() < deadline:
+                time.sleep(0.05)
+            self.assertTrue(bound_file.exists(), "bound-Datei wurde nicht geschrieben")
+
+            proc.send_signal(signal.SIGTERM)
+            try:
+                returncode = proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                self.fail("Prozess hat auf SIGTERM nicht beendet")
+
+        self.assertEqual(returncode, 0)
+        self.assertFalse(bound_file.exists(), "bound-Datei nach SIGTERM noch vorhanden")
+
+
 if __name__ == "__main__":
     unittest.main()

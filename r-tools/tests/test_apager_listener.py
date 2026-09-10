@@ -162,18 +162,52 @@ class TestRedactPath(unittest.TestCase):
     """Das listener.log wird jetzt vorgelesen — das Token darf nicht drinstehen."""
 
     def test_the_token_is_removed(self):
-        self.assertEqual(listener.redact_path("/alarm/geheim"), "/alarm/<token>")
+        self.assertEqual(listener.redact_path("/alarm/geheim", "geheim"), "/alarm/<token>")
 
     def test_the_query_survives(self):
         self.assertEqual(
-            listener.redact_path("/alarm/geheim?stichwort=B2"),
+            listener.redact_path("/alarm/geheim?stichwort=B2", "geheim"),
             "/alarm/<token>?stichwort=B2",
         )
 
     def test_paths_without_a_token_stay_readable(self):
         # Eine Sonde muss von einem echten aPager-Request unterscheidbar bleiben.
-        self.assertEqual(listener.redact_path("/favicon.ico"), "/favicon.ico")
-        self.assertEqual(listener.redact_path("/"), "/")
+        self.assertEqual(listener.redact_path("/favicon.ico", "geheim"), "/favicon.ico")
+        self.assertEqual(listener.redact_path("/", "geheim"), "/")
+
+    def test_extra_path_segments_after_the_token_are_still_redacted(self):
+        self.assertEqual(
+            listener.redact_path("/alarm/geheim/extra", "geheim"),
+            "/alarm/<token>/extra",
+        )
+
+    def test_near_miss_prefixes_no_longer_leak_the_token(self):
+        # Der urspruengliche Fehler: token_from_path() kannte nur den exakten
+        # Praefix "/alarm/" — ein vertippter Pfad liess das echte Token
+        # unveraendert durch. Redigiert wird jetzt anhand des Inhalts, nicht
+        # der Pfadform, also treffen auch diese Faelle.
+        near_misses = [
+            "/Alarm/geheim",
+            "//alarm/geheim",
+            "/alarm2/geheim",
+            "/ALARM/geheim",
+            "/alarm%2fgeheim",
+        ]
+        for path in near_misses:
+            with self.subTest(path=path):
+                self.assertNotIn("geheim", listener.redact_path(path, "geheim"))
+
+    def test_an_empty_token_redacts_nothing(self):
+        # str.replace("", ...) wuerde sonst jedes Zeichen ersetzen.
+        self.assertEqual(listener.redact_path("/alarm/x", ""), "/alarm/x")
+
+    def test_redacts_the_token_inside_an_arbitrary_message_too(self):
+        # log_error() (siehe TestHandler) redigiert nicht nur Pfade, sondern
+        # auch freien Text wie eine kaputte Requestzeile.
+        self.assertNotIn(
+            "geheim",
+            listener.redact_path("Bad request syntax ('GET /alarm/geheim X')", "geheim"),
+        )
 
 
 class TestFormatAlarms(unittest.TestCase):
@@ -548,6 +582,47 @@ class TestHandler(_HandlerFixture, unittest.TestCase):
 
         self.assertEqual(self._status_of(response), 500)
         self.assertTrue(any("Anfrage fehlgeschlagen" in e for e in self.events))
+
+    def test_an_unsupported_method_gets_501_and_leaves_a_trace(self):
+        # PUT/HEAD/OPTIONS haben kein do_*; BaseHTTPRequestHandler beantwortet
+        # das selbst per send_error(), an _dispatch/_reject vorbei. Vor der
+        # Ueberschreibung von log_error schluckte log_message() (s.o.) das
+        # komplett: der Absender bekam die 501, aber weder listener.log noch
+        # "apager status" sahen je etwas davon.
+        for method in ("PUT", "HEAD", "OPTIONS"):
+            with self.subTest(method=method):
+                self.events.clear()
+                status = self._request(method, "/alarm/geheim")
+                self.assertEqual(status, 501)
+                self.assertTrue(any("abgewiesen" in e for e in self.events))
+
+    def test_an_unsupported_method_does_not_carry_the_token(self):
+        self._request("PUT", "/alarm/geheim")
+        joined = "\n".join(self.events)
+        self.assertNotIn("geheim", joined)
+        self.assertIn("/alarm/<token>", joined)
+
+    def test_a_malformed_request_line_gets_400_and_leaves_a_trace(self):
+        # Zu viele Woerter in der Requestzeile scheitern schon in
+        # parse_request(), bevor self.command/self.path je gesetzt werden —
+        # log_error() muss trotzdem ohne Traceback eine Spur hinterlassen. Das
+        # letzte Wort ist bewusst eine gueltige HTTP-Version: nur dann setzt
+        # parse_request() self.request_version um, bevor es abbricht, und
+        # send_error() schreibt ueberhaupt eine Statuszeile (sonst behandelt
+        # http.server die Verbindung als HTTP/0.9 und antwortet ohne eine).
+        with socket.create_connection(("127.0.0.1", self.port), timeout=3) as sock:
+            sock.sendall(b"GARBAGE REQUEST LINE HTTP/1.1\r\n\r\n")
+            response = sock.recv(65536)
+        self.assertEqual(self._status_of(response), 400)
+        self.assertTrue(any("abgewiesen" in e for e in self.events))
+
+    def test_a_malformed_request_line_still_redacts_an_embedded_token(self):
+        with socket.create_connection(("127.0.0.1", self.port), timeout=3) as sock:
+            sock.sendall(b"GET /alarm/geheim EXTRA JUNK HTTP/1.1\r\n\r\n")
+            response = sock.recv(65536)
+        self.assertEqual(self._status_of(response), 400)
+        joined = "\n".join(self.events)
+        self.assertNotIn("geheim", joined)
 
 
 class TestChunkedBodies(_HandlerFixture, unittest.TestCase):

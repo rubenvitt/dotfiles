@@ -322,9 +322,14 @@ Musterstrasse 12, Musterstadt
 Ausgeloest von: apager test"
 
   printf 'Sende an http://%s/alarm/...\n' "$bound"
-  curl -fsS --max-time 5 -X POST --data-binary "$body" \
-    "http://$bound/alarm/$token" >/dev/null \
+  # -K - liest die URL (und damit das Token) aus einem Config-Stream auf
+  # stdin statt als Kommandozeilenargument: als Argument stuende es fuer die
+  # Laufzeit des Aufrufs in "ps" sichtbar fuer jeden Prozess auf der Maschine
+  # — genau das verbietet CLAUDE.md fuer Geheimnisse.
+  curl -fsS --max-time 5 -X POST --data-binary "$body" -K - >/dev/null <<CURLCFG \
     || die "der Listener hat nicht angenommen — 'apager logs' und $LISTENER_LOG ansehen"
+url = "http://$bound/alarm/$token"
+CURLCFG
   printf 'Angenommen. Der Dialog sollte jetzt offen sein.\n'
 }
 

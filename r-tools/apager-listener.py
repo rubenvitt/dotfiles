@@ -145,23 +145,30 @@ def token_matches(path, expected):
     )
 
 
-def redact_path(path):
-    """Der Pfad fuers listener.log, ohne das Token.
+def redact_path(text, token):
+    """Text fuers listener.log (Pfad oder Fehlermeldung), ohne das Token.
 
     Im Pfad steht das Geheimnis — aPager laesst keine eigenen Header zu. Das
     listener.log wird von "apager status" und "apager logs --listener"
     vorgelesen und landet damit in Ausgaben, die jemand weiterreicht, wenn er
-    fragt, warum nichts ankommt. Welcher Pfad getroffen wurde, bleibt
-    erkennbar: eine Sonde auf /favicon.ico sieht anders aus als ein echter
-    aPager-Request mit falschem Token.
+    fragt, warum nichts ankommt.
+
+    Fruehere Fassung redigierte anhand der Pfadform (Praefix exakt
+    "/alarm/"): ein vertippter Pfad ("/Alarm/...", "//alarm/...",
+    "/alarm2/...") liess das echte Token unveraendert durch — der Mechanismus
+    stimmte, die Grenze war falsch gezogen. Die Regel jetzt kennt keine
+    Ausnahmen mehr: jedes Vorkommen des echten Tokens im uebergebenen Text
+    verschwindet, ganz gleich wo und in welcher Pfadform es steht.
+
+    Ein leeres erwartetes Token redigiert nichts — sonst wuerde
+    str.replace("", ...) jedes Zeichen im Text durch den Platzhalter ersetzen.
 
     Das alarms.log behaelt den vollstaendigen Pfad: es ist die Vorlage fuer
     das spaetere Feldmapping und liegt nicht in Terminalausgaben.
     """
-    if token_from_path(path) is None:
-        return path
-    _, _, query = path.partition("?")
-    return "/alarm/<token>" + ("?" + query if query else "")
+    if not token:
+        return text
+    return text.replace(token, "<token>")
 
 
 def format_alarms(alarms):
@@ -423,8 +430,32 @@ def make_handler(token, display, alarm_log, allow_source=is_tailnet_ip, on_event
             # listener.log; wir protokollieren selbst, was zaehlt.
             pass
 
+        def log_error(self, fmt, *args):
+            """Faengt, was BaseHTTPRequestHandler an _dispatch vorbei selbst
+            beantwortet: unbekannte Methoden (PUT, HEAD, OPTIONS -> 501, weil
+            kein do_* existiert) und kaputte Requestzeilen (400), beide ueber
+            sein eigenes send_error(). log_message() oben schluckte das bisher
+            komplett — der Absender bekam die Fehlerzeile, aber weder
+            listener.log noch "apager status" sahen sie je. Harmlos, solange
+            "status" nichts behauptete; seit die Abgewiesen-Zeile Gesundheit
+            signalisiert, ist genau das die Fluchtstelle desselben
+            Fehlerbilds: eine Anfrage prallt spurlos ab.
+
+            self.command/self.path existieren hier nicht immer — eine kaputte
+            Requestzeile faellt schon in parse_request() aus der
+            Wortzahl-Pruefung, bevor beide gesetzt werden. self.requestline
+            ist in dem Fall trotzdem da und dient als Ersatz.
+            """
+            command = getattr(self, "command", None) or "?"
+            where = getattr(self, "path", None) or getattr(self, "requestline", "") or "?"
+            notify(
+                "abgewiesen: {} ({} {})".format(
+                    redact_path(fmt % args, token), command, redact_path(where, token)
+                )
+            )
+
         def _reject(self, reason, status=404):
-            notify("abgewiesen: {} ({} {})".format(reason, self.command, redact_path(self.path)))
+            notify("abgewiesen: {} ({} {})".format(reason, self.command, redact_path(self.path, token)))
             self._responded = True
             self.send_response(status)
             self.send_header("Content-Length", "0")
@@ -446,7 +477,7 @@ def make_handler(token, display, alarm_log, allow_source=is_tailnet_ip, on_event
             try:
                 self._dispatch(method)
             except Exception as exc:
-                notify("Anfrage fehlgeschlagen: {!r} ({} {})".format(exc, method, redact_path(self.path)))
+                notify("Anfrage fehlgeschlagen: {!r} ({} {})".format(exc, method, redact_path(self.path, token)))
                 self._answer_with_failure()
 
         def _answer_with_failure(self):
@@ -506,7 +537,7 @@ def make_handler(token, display, alarm_log, allow_source=is_tailnet_ip, on_event
                 self._reject(str(exc), status=400)
                 return
             if note:
-                notify("{} ({} {})".format(note, method, redact_path(self.path)))
+                notify("{} ({} {})".format(note, method, redact_path(self.path, token)))
 
             received_at = datetime.now()
             headers_text = str(self.headers)

@@ -202,6 +202,43 @@ class TestAlarmDisplay(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertEqual(len(display.pending()), 1)
 
+    def test_on_error_can_safely_call_pending_without_deadlock(self):
+        # Gegentest zum Deadlock-Verbot: der on_error-Callback darf in derselben
+        # AlarmDisplay-Instanz .pending() aufrufen, ohne dass der Thread, der
+        # add() aufgerufen hat, auf einen Lock wartet, den der Callback auch
+        # benoetigt. Das Test laueft add() in einem Thread und wartet mit Timeout,
+        # um den Deadlock sichtbar zu machen, falls er existiert.
+        def broken_spawn(text):
+            raise OSError("osascript fehlt")
+
+        results = []
+
+        def on_error_that_queries_pending(exc):
+            # Dies ist natuerlich in einem echten Callback: auf Fehler den
+            # kompletten Alarmkontext ausgeben, um debugging zu erleichtern.
+            pending = self.display.pending()
+            results.append((exc, pending))
+
+        self.display._on_error = on_error_that_queries_pending
+        self.display._spawn = broken_spawn
+
+        # Lauefe add() in einem separaten Thread, damit der Deadlock sichtbar
+        # wird (wenn vorhanden).
+        thread = threading.Thread(
+            target=lambda: self.display.add(self._alarm(0, "TEST"))
+        )
+        thread.start()
+        thread.join(timeout=3)
+
+        # Wenn der Thread noch laeuft, ist das ein Deadlock.
+        self.assertFalse(
+            thread.is_alive(),
+            "add() did not return within 3 seconds; likely deadlock in on_error",
+        )
+        self.assertEqual(len(results), 1)
+        self.assertIsInstance(results[0][0], OSError)
+        self.assertEqual(len(results[0][1]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

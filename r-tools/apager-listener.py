@@ -151,10 +151,12 @@ class AlarmDisplay:
     def add(self, alarm):
         with self._lock:
             self._alarms.append(alarm)
-            self._restart_dialog()
+            exc = self._restart_dialog()
+        if exc is not None:
+            self._on_error(exc)
 
     def _restart_dialog(self):
-        """Nur mit gehaltenem Lock aufrufen."""
+        """Nur mit gehaltenem Lock aufrufen. Gibt Exception zurueck (oder None)."""
         if self._proc is not None:
             try:
                 self._proc.terminate()
@@ -173,8 +175,7 @@ class AlarmDisplay:
             # Kein Ausweichen auf Ton oder Benachrichtigung: beide Kanaele sind
             # bewusst abgewaehlt, siehe Spec.
             self._proc = None
-            self._on_error(exc)
-            return
+            return exc
 
         self._proc = proc
         watcher = threading.Thread(
@@ -183,6 +184,7 @@ class AlarmDisplay:
             daemon=True,
         )
         watcher.start()
+        return None
 
     def _wait_for_acknowledgement(self, proc, generation):
         try:

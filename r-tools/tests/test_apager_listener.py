@@ -2,6 +2,7 @@
 
 import importlib.util
 import pathlib
+import time
 import unittest
 from datetime import datetime
 
@@ -116,6 +117,90 @@ class TestFormatAlarms(unittest.TestCase):
 
     def test_empty_list_yields_empty_string(self):
         self.assertEqual(listener.format_alarms([]), "")
+
+
+import threading
+
+
+class FakeProc:
+    """Ein Dialogprozess, den der Test von Hand beenden kann."""
+
+    def __init__(self, text):
+        self.text = text
+        self.terminated = False
+        self._done = threading.Event()
+
+    def wait(self):
+        self._done.wait(timeout=5)
+        return 0
+
+    def terminate(self):
+        self.terminated = True
+        self._done.set()
+
+    def finish(self):
+        """Der Benutzer hat quittiert."""
+        self._done.set()
+
+
+class TestAlarmDisplay(unittest.TestCase):
+    def setUp(self):
+        self.spawned = []
+
+        def fake_spawn(text):
+            proc = FakeProc(text)
+            self.spawned.append(proc)
+            return proc
+
+        self.display = listener.AlarmDisplay(spawn=fake_spawn)
+
+    def _alarm(self, minute, text):
+        return listener.Alarm(datetime(2026, 9, 10, 14, minute, 0), text)
+
+    def test_first_alarm_opens_one_dialog(self):
+        self.display.add(self._alarm(0, "ERSTER"))
+        self.assertEqual(len(self.spawned), 1)
+        self.assertIn("ERSTER", self.spawned[0].text)
+
+    def test_second_alarm_replaces_the_dialog_and_shows_both(self):
+        self.display.add(self._alarm(0, "ERSTER"))
+        self.display.add(self._alarm(5, "ZWEITER"))
+
+        self.assertEqual(len(self.spawned), 2)
+        self.assertTrue(self.spawned[0].terminated)
+        self.assertIn("ERSTER", self.spawned[1].text)
+        self.assertIn("ZWEITER", self.spawned[1].text)
+        self.assertEqual(len(self.display.pending()), 2)
+
+    def test_acknowledging_clears_the_list(self):
+        self.display.add(self._alarm(0, "ERSTER"))
+        self.spawned[0].finish()
+
+        deadline = time.time() + 5
+        while self.display.pending() and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(self.display.pending(), [])
+
+    def test_replaced_dialog_does_not_clear_the_new_list(self):
+        # Der Kern der Sache: der Watcher des ersten Dialogs endet, weil wir
+        # ihn ersetzt haben — nicht, weil jemand quittiert hat. Er darf die
+        # Liste des zweiten Dialogs nicht anruehren.
+        self.display.add(self._alarm(0, "ERSTER"))
+        self.display.add(self._alarm(5, "ZWEITER"))
+
+        time.sleep(0.2)
+        self.assertEqual(len(self.display.pending()), 2)
+
+    def test_a_failing_spawn_keeps_the_alarm_in_the_list(self):
+        def broken_spawn(text):
+            raise OSError("osascript fehlt")
+
+        errors = []
+        display = listener.AlarmDisplay(spawn=broken_spawn, on_error=errors.append)
+        display.add(self._alarm(0, "ERSTER"))
+
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(len(display.pending()), 1)
 
 
 if __name__ == "__main__":

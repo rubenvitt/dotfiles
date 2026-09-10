@@ -49,6 +49,8 @@ EOF
 
 die() { printf 'apager: %s\n' "$1" >&2; exit 1; }
 
+# --- Zustand abfragen --------------------------------------------------------
+
 config_value() {
   [[ -f "$CONFIG" ]] || return 1
   sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"\{0,1\}\([^\"]*\)\"\{0,1\}[[:space:]]*$/\1/p" "$CONFIG" | head -1
@@ -69,10 +71,22 @@ bound_address() { [[ -f "$BOUND" ]] && cat "$BOUND" || true; }
 # kein curl noetig, nur ein Verbindungsversuch mit Timeout. Ein abgelehnter
 # oder haengender Connect darf das Skript unter "set -e" nicht beenden,
 # deshalb steht der Aufruf immer in einer Bedingung.
+#
+# "timeout" gibt es auf einem frischen macOS nicht, nur ueber Homebrews
+# coreutils. Ohne es faellt die Pruefung auf einen Connect ohne Zeitschranke
+# zurueck: jede Adresse hier ist die eigene Maschine, der Kernel antwortet
+# also sofort mit ACK, RST oder EHOSTUNREACH — der Timeout war ohnehin nur
+# ein Guertel, nicht die Hose.
 listener_alive() {
   local addr="$1"
-  timeout 2 bash -c "echo > /dev/tcp/${addr%:*}/${addr##*:}" 2>/dev/null
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 2 bash -c "echo > /dev/tcp/${addr%:*}/${addr##*:}" 2>/dev/null
+  else
+    bash -c "echo > /dev/tcp/${addr%:*}/${addr##*:}" 2>/dev/null
+  fi
 }
+
+# --- Aktionen ----------------------------------------------------------------
 
 do_install() {
   [[ -f "$LISTENER" ]] || die "apager-listener.py fehlt neben $0"
@@ -137,6 +151,7 @@ do_uninstall() {
 do_url() {
   local token port bound
   token="$(config_value APAGER_TOKEN)" || die "keine Config — erst 'apager install'"
+  [[ -n "$token" ]] || die "APAGER_TOKEN fehlt in $CONFIG"
   port="$(config_value APAGER_PORT)"
   bound="$(bound_address)"
 
@@ -184,8 +199,15 @@ do_status() {
 
   if [[ -s "$ALARM_LOG" ]]; then
     local last
-    last="$(grep -a '^===== ' "$ALARM_LOG" | tail -1 | tr -d '= ')"
-    printf 'Letzter Alarm %s\n' "$last"
+    # Kein Treffer ist kein Skriptabbruch wert: eine Datei mit Inhalt, aber
+    # ohne passende Zeile (abgebrochener Schreibvorgang, verirrte Zeile vor
+    # dem ersten Block), ist ein Anzeigefall, kein Fehlerfall.
+    last="$(grep -a '^===== ' "$ALARM_LOG" | tail -1 | tr -d '= ')" || true
+    if [[ -n "$last" ]]; then
+      printf 'Letzter Alarm %s\n' "$last"
+    else
+      printf 'Letzter Alarm kein passender Eintrag im Protokoll\n'
+    fi
   else
     printf 'Letzter Alarm noch keiner\n'
   fi
@@ -198,6 +220,7 @@ do_test() {
   listener_alive "$bound" \
     || die "veraltete Datei ($bound) — der Listener antwortet nicht, 'apager status' zeigt warum"
   token="$(config_value APAGER_TOKEN)" || die "keine Config — erst 'apager install'"
+  [[ -n "$token" ]] || die "APAGER_TOKEN fehlt in $CONFIG"
 
   # Bewusst an die gebundene Tailscale-Adresse und nicht an 127.0.0.1: nur so
   # laufen Bind, Herkunftspruefung und Tokenvergleich wirklich mit. Ueber

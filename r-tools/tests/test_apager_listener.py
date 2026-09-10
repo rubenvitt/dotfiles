@@ -19,107 +19,91 @@ listener = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(listener)
 
 
-# Gekuerzte, aber echte ifconfig-Ausgabe: eine Loopback-, eine LAN- und eine
-# Tailscale-Adresse. Die Reihenfolge ist Absicht — die LAN-Adresse steht vor
-# der Tailscale-Adresse, damit ein Griff nach der "ersten" Adresse auffliegt.
-IFCONFIG_SAMPLE = """\
-lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
-\tinet 127.0.0.1 netmask 0xff000000
-en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
-\tinet 192.168.178.42 netmask 0xffffff00 broadcast 192.168.178.255
-utun4: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
-\tinet 100.101.102.103 --> 100.101.102.103 netmask 0xff000000
-\tinet6 fd7a:115c:a1e0::1234 prefixlen 128
-"""
-
-IFCONFIG_NO_TAILSCALE = """\
-lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
-\tinet 127.0.0.1 netmask 0xff000000
-en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
-\tinet 192.168.178.42 netmask 0xffffff00 broadcast 192.168.178.255
-"""
-
-# Der Fall, um den es geht: 100.64.0.0/10 ist der CGNAT-Bereich der
-# Mobilfunkanbieter. Ein Mac, der ueber einen solchen Carrier tethert, traegt
-# eine Adresse daraus auf en0 — und die steht hier vor der Tailscale-Adresse.
-IFCONFIG_CGNAT_TETHERING = """\
-lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
-\tinet 127.0.0.1 netmask 0xff000000
-en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
-\tinet 100.92.7.31 netmask 0xfffffc00 broadcast 100.92.7.255
-utun4: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1280
-\tinet 100.101.102.103 --> 100.101.102.103 netmask 0xff000000
-\tinet6 fd7a:115c:a1e0::1234 prefixlen 128
-"""
-
-# Getethert, aber Tailscale laeuft nicht. Die CGNAT-Adresse auf en0 ist eine
-# gueltige Tailnet-Adresse und trotzdem die falsche: haengte der Listener
-# daran, lauschte er am Mobilfunk-Interface.
-IFCONFIG_CGNAT_ONLY = """\
-lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
-\tinet 127.0.0.1 netmask 0xff000000
-en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
-\tinet 100.92.7.31 netmask 0xfffffc00 broadcast 100.92.7.255
-"""
+# Adressen, die frueher gebunden werden durften und es jetzt nicht mehr duerfen.
+# Alle drei sind synthetisch: .dotfiles ist oeffentlich, hier steht keine echte
+# Tailnet-Adresse.
+TAILNET_V4 = "100.101.102.103"
+TAILNET_V6 = "fd7a:115c:a1e0::1234"
+LAN_V4 = "192.168.178.42"
 
 
-class TestIsTailnetIp(unittest.TestCase):
-    def test_tailscale_v4_is_accepted(self):
-        self.assertTrue(listener.is_tailnet_ip("100.101.102.103"))
+class TestIsLoopbackIp(unittest.TestCase):
+    """Die Herkunftspruefung hat sich umgedreht.
 
-    def test_tailscale_v6_is_accepted(self):
-        self.assertTrue(listener.is_tailnet_ip("fd7a:115c:a1e0::1234"))
+    Frueher war "aus dem Tailnet" die tragende Bedingung, und Loopback wurde
+    abgewiesen. Seit Tailscale Serve vor dem Listener steht, kommt jede
+    legitime Anfrage aus dem lokalen Proxy — der Listener bindet nur an
+    127.0.0.1 und ist von keinem Netz aus erreichbar. Eine Quelle, die nicht
+    Loopback ist, kann es damit gar nicht regulaer geben; sie zeigt an, dass
+    etwas anderes als gedacht laeuft.
+    """
+
+    def test_ipv4_loopback_is_accepted(self):
+        self.assertTrue(listener.is_loopback_ip("127.0.0.1"))
+
+    def test_ipv6_loopback_is_accepted(self):
+        self.assertTrue(listener.is_loopback_ip("::1"))
+
+    def test_the_whole_loopback_range_is_accepted(self):
+        # 127.0.0.0/8 ist vollstaendig Loopback und verlaesst die Maschine
+        # nicht — es gibt keinen Grund, innerhalb davon zu unterscheiden.
+        self.assertTrue(listener.is_loopback_ip("127.0.0.53"))
+        self.assertTrue(listener.is_loopback_ip("127.255.255.254"))
+
+    def test_a_tailnet_address_is_now_rejected(self):
+        # Die Umkehrung, um die es geht: genau diese Adresse war frueher die
+        # einzig zulaessige Quelle.
+        self.assertFalse(listener.is_loopback_ip(TAILNET_V4))
+        self.assertFalse(listener.is_loopback_ip(TAILNET_V6))
 
     def test_lan_address_is_rejected(self):
-        self.assertFalse(listener.is_tailnet_ip("192.168.178.42"))
+        self.assertFalse(listener.is_loopback_ip(LAN_V4))
 
-    def test_loopback_is_rejected(self):
-        self.assertFalse(listener.is_tailnet_ip("127.0.0.1"))
+    def test_the_wildcard_address_is_rejected(self):
+        # 0.0.0.0 ist keine Quelladresse, sondern die Adresse, auf die dieser
+        # Listener nie binden darf. Sie hier durchzulassen waere sinnlos.
+        self.assertFalse(listener.is_loopback_ip("0.0.0.0"))
+        self.assertFalse(listener.is_loopback_ip("::"))
 
-    def test_neighbouring_range_is_rejected(self):
-        # 100.128.0.0 liegt knapp ausserhalb von 100.64.0.0/10.
-        self.assertFalse(listener.is_tailnet_ip("100.128.0.1"))
+    def test_an_ipv4_mapped_loopback_is_rejected(self):
+        # ::ffff:127.0.0.1 kann bei einem Bind auf 127.0.0.1 nicht ankommen.
+        # Im Zweifel zu: eine Form, die nicht auftreten kann, muss auch nicht
+        # akzeptiert werden.
+        self.assertFalse(listener.is_loopback_ip("::ffff:127.0.0.1"))
 
     def test_garbage_is_rejected_without_raising(self):
-        self.assertFalse(listener.is_tailnet_ip("nicht-eine-adresse"))
-        self.assertFalse(listener.is_tailnet_ip(""))
+        self.assertFalse(listener.is_loopback_ip("nicht-eine-adresse"))
+        self.assertFalse(listener.is_loopback_ip(""))
 
 
-class TestTailnetAddress(unittest.TestCase):
-    def test_picks_the_tailscale_address_not_the_first_one(self):
-        self.assertEqual(
-            listener.tailnet_address(IFCONFIG_SAMPLE), "100.101.102.103"
-        )
+class TestBindAddress(unittest.TestCase):
+    """Die Bindadresse ist eine Konstante und keine Suche mehr.
 
-    def test_returns_none_when_tailscale_is_down(self):
-        self.assertIsNone(listener.tailnet_address(IFCONFIG_NO_TAILSCALE))
+    Sie im Test festzunageln ist kein Zirkelschluss: 0.0.0.0 statt 127.0.0.1
+    waere ein Einzeiler, der den Listener still fuer das ganze Netz oeffnet,
+    ohne dass irgendein anderer Test dagegen anschlaegt.
+    """
 
-    def test_prefers_utun_over_a_cgnat_address_on_en0(self):
-        # Ohne Interface-Pruefung faellt hier die Mobilfunkadresse heraus, und
-        # der Listener lauscht am falschen Interface, waehrend "status" alles
-        # gruen meldet.
-        self.assertEqual(
-            listener.tailnet_address(IFCONFIG_CGNAT_TETHERING), "100.101.102.103"
-        )
+    def test_the_listener_binds_to_loopback_only(self):
+        self.assertTrue(listener.is_loopback_ip(listener.BIND_ADDRESS))
+        self.assertNotEqual(listener.BIND_ADDRESS, "0.0.0.0")
 
-    def test_a_cgnat_address_without_tailscale_is_not_used(self):
-        # Lieber gar nicht binden als ans Mobilfunk-Interface: "keine Adresse"
-        # ist eine sichtbare Aussage, ein falsches Interface ist keine.
-        self.assertIsNone(listener.tailnet_address(IFCONFIG_CGNAT_ONLY))
 
-    def test_parses_interface_and_address_pairs_in_order(self):
-        self.assertEqual(
-            listener.parse_ifconfig_addresses(IFCONFIG_SAMPLE),
-            [
-                ("lo0", "127.0.0.1"),
-                ("en0", "192.168.178.42"),
-                ("utun4", "100.101.102.103"),
-            ],
-        )
+class TestNoTailnetKnowledgeLeft(unittest.TestCase):
+    """Der Listener weiss nichts mehr ueber Tailscale.
 
-    def test_inet6_lines_are_not_mistaken_for_addresses(self):
-        pairs = listener.parse_ifconfig_addresses(IFCONFIG_SAMPLE)
-        self.assertNotIn("fd7a:115c:a1e0::1234", [addr for _, addr in pairs])
+    Die Adresssuche ueber ifconfig, die Interface-Bevorzugung und die
+    CGNAT-Bereichspruefung sind ersatzlos entfallen — Serve terminiert HTTPS
+    und leitet nach 127.0.0.1 weiter, der Listener sieht nur noch Loopback.
+    Eine ungenutzte Funktion "fuer alle Faelle" waere hier keine Reserve,
+    sondern ein zweiter, unerprobter Bindpfad.
+    """
+
+    def test_the_old_address_lookup_is_gone(self):
+        for name in ("tailnet_address", "parse_ifconfig_addresses", "is_tailnet_ip"):
+            self.assertFalse(
+                hasattr(listener, name), "{} lebt noch im Listener".format(name)
+            )
 
 
 class TestToken(unittest.TestCase):
@@ -742,29 +726,123 @@ class TestReadChunked(unittest.TestCase):
 
 
 class TestSourceCheck(unittest.TestCase):
-    def test_handler_rejects_sources_outside_the_tailnet(self):
-        # Der Vorgabewert von allow_source ist is_tailnet_ip; ein Testserver
-        # auf 127.0.0.1 muss damit abgewiesen werden.
+    """Der Vorgabewert von allow_source, an einem echten Server gepruefte.
+
+    Der Vorgabewert ist die Fassung, die unter launchd laeuft — make_handler
+    wird in main() ohne allow_source aufgerufen. Ein Test, der ihn ueberschreibt,
+    prueft die Herkunftspruefung nie.
+    """
+
+    def _serve(self, spoofed_source=None):
+        """Startet einen Handler mit dem echten Vorgabewert fuer allow_source.
+
+        spoofed_source setzt die Adresse, die der Handler als Absender sieht.
+        Anders geht es nicht: eine Anfrage von einer echten Nicht-Loopback-
+        Adresse liesse sich hier nur mit einem zweiten Interface erzeugen. Die
+        Zuweisung passt in setup(), weil BaseRequestHandler.__init__ zuerst
+        client_address setzt und dann setup() ruft.
+        """
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        events = []
+        self.events = []
+        self.shown = []
+
+        class RecordingDisplay:
+            def add(inner, alarm):
+                self.shown.append(alarm)
+
         handler = listener.make_handler(
             token="geheim",
-            display=None,
+            display=RecordingDisplay(),
             alarm_log=pathlib.Path(tmp.name) / "alarms.log",
-            on_event=events.append,
+            on_event=self.events.append,
         )
+        if spoofed_source is not None:
+
+            class SpoofedHandler(handler):
+                def setup(inner):
+                    inner.client_address = (spoofed_source, 41234)
+                    super().setup()
+
+            handler = SpoofedHandler
+
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.addCleanup(server.server_close)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(server.shutdown)
+        return server.server_address[1]
 
-        conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
-        conn.request("POST", "/alarm/geheim", body="egal")
+    def _post(self, port, path="/alarm/geheim"):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("POST", path, body="B2 Wohnungsbrand")
         response = conn.getresponse()
         response.read()
         conn.close()
-        self.assertEqual(response.status, 404)
+        return response.status
+
+    def test_loopback_is_accepted(self):
+        # Die Umkehrung gegenueber der alten Fassung: dieselbe Anfrage, die
+        # frueher mit 404 abprallte, ist jetzt der Regelfall — Serve leitet
+        # jeden echten Alarm ueber genau diesen Weg herein.
+        self.assertEqual(self._post(self._serve()), 200)
+        self.assertEqual(len(self.shown), 1)
+
+    def test_a_tailnet_source_is_rejected(self):
+        # Frueher die einzig zulaessige Quelle. Der Listener bindet nicht mehr
+        # ans Tailnet, also kann von dort nichts regulaer kommen.
+        self.assertEqual(self._post(self._serve(spoofed_source=TAILNET_V4)), 404)
+        self.assertEqual(self.shown, [])
+        self.assertTrue(any("abgewiesen" in event for event in self.events))
+
+    def test_a_lan_source_is_rejected(self):
+        self.assertEqual(self._post(self._serve(spoofed_source=LAN_V4)), 404)
+        self.assertEqual(self.shown, [])
+
+    def test_the_source_is_checked_before_the_token(self):
+        # Sonst waere die Herkunftspruefung wirkungslos, sobald jemand das
+        # Token kennt — und das Token steht im Pfad, den aPager weitergibt.
+        port = self._serve(spoofed_source=TAILNET_V4)
+        self.assertEqual(self._post(port, "/alarm/geheim"), 404)
+        self.assertTrue(
+            any("Quelle" in event for event in self.events),
+            "abgewiesen wurde, aber nicht wegen der Quelle: {}".format(self.events),
+        )
+
+
+class TestHealthEndpoint(_HandlerFixture, unittest.TestCase):
+    """GET /healthz — der Pfad, den "apager status" von aussen anstoesst.
+
+    Er braucht kein Token: er transportiert keine Alarmdaten und verraet
+    nichts. Er braucht vor allem eine eigene Antwort *vor* dem Tokenvergleich,
+    sonst zaehlte jede Statusabfrage als abgewiesene Anfrage — und genau diese
+    Zahl ist das Signal, an dem ein veraltetes Token auffliegt. Eine Anzeige,
+    die ihr eigenes Nachsehen als Stoerung protokolliert, waere schlimmer als
+    gar keine.
+    """
+
+    def test_healthz_answers_204(self):
+        self.assertEqual(self._request("GET", "/healthz"), 204)
+
+    def test_healthz_leaves_no_trace_at_all(self):
+        self._request("GET", "/healthz")
+        self.assertEqual(self.events, [], "Statusabfrage im listener.log")
+        self.assertEqual(self.shown, [])
+        self.assertFalse(self.alarm_log.exists())
+
+    def test_healthz_tolerates_a_query_string(self):
+        self.assertEqual(self._request("GET", "/healthz?von=status"), 204)
+        self.assertEqual(self.events, [])
+
+    def test_post_to_healthz_is_not_a_health_check(self):
+        # Nur GET. Ein POST auf diesen Pfad ist keine Statusabfrage, sondern
+        # ein Alarm am falschen Pfad — und der gehoert in die Abgewiesen-Zahl.
+        self.assertEqual(self._request("POST", "/healthz", body="B2"), 404)
+        self.assertEqual(self.shown, [])
+        self.assertTrue(any("abgewiesen" in event for event in self.events))
+
+    def test_a_near_miss_path_is_not_a_health_check(self):
+        for path in ("/healthz/", "/healthzz", "/Healthz"):
+            self.assertEqual(self._request("GET", path), 404, path)
 
 
 class TestReadConfig(unittest.TestCase):
@@ -798,7 +876,7 @@ class TestCleanupBoundFile(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         bound_file = pathlib.Path(tmp.name) / "bound"
-        bound_file.write_text("100.64.1.2:8787\n", encoding="utf-8")
+        bound_file.write_text("127.0.0.1:8787\n", encoding="utf-8")
         listener._cleanup_bound_file(bound_file)
         self.assertFalse(bound_file.exists())
 
@@ -873,10 +951,9 @@ class TestSigtermCleanup(unittest.TestCase):
     Signal-Handler sind Prozesseigenschaften, kein Thread-lokaler Zustand —
     "sende SIGTERM an einen Thread in diesem Testprozess" waere kein Test des
     tatsaechlichen Verhaltens. Ein echter Kindprozess ist deshalb kein
-    Overkill, sondern der einzige ehrliche Weg. Er ruft serve() direkt mit
-    einer festen Adresse auf, nicht main() ueber tailnet_address() — dieser
-    Rechner hat kein laufendes Tailscale, und die SIGTERM-Frage ist unabhaengig
-    davon, welche Adresse gebunden wurde.
+    Overkill, sondern der einzige ehrliche Weg. Er ruft serve() direkt auf,
+    nicht main(): main() liest die echte Config des Rechners, und die
+    SIGTERM-Frage haengt daran nicht.
     """
 
     _HARNESS = """\
@@ -920,6 +997,17 @@ listener.serve(
             while not bound_file.exists() and time.time() < deadline:
                 time.sleep(0.05)
             self.assertTrue(bound_file.exists(), "bound-Datei wurde nicht geschrieben")
+
+            # Der Vertrag, an dem die Ehrlichkeit von "apager status" haengt:
+            # "<adresse>:<port>\n", und der Port ist der tatsaechlich
+            # gebundene. Der Harness bittet um Port 0 — stuende der in der
+            # Datei, laese "status" eine Adresse vor, an der nie jemand
+            # horchte.
+            written = bound_file.read_text(encoding="utf-8")
+            self.assertTrue(written.endswith("\n"), repr(written))
+            address, _, port = written.strip().rpartition(":")
+            self.assertEqual(address, "127.0.0.1")
+            self.assertGreater(int(port), 0)
 
             proc.send_signal(signal.SIGTERM)
             try:

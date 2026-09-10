@@ -7,7 +7,9 @@
 # oeffentlich, und ein Token, mit dem sich Alarme einspeisen lassen, hat darin
 # nichts zu suchen.
 
-# Port, auf dem der Listener horcht. Nur auf der Tailscale-Adresse erreichbar.
+# Port, auf dem der Listener horcht — ausschliesslich auf 127.0.0.1. Von aussen
+# erreichbar wird er nur ueber Tailscale Serve, das HTTPS terminiert und hierher
+# weiterleitet. `apager install` richtet Serve auf genau diesen Port ein.
 APAGER_PORT="8787"
 
 # Zufaelliges Geheimnis im URL-Pfad: /alarm/<token>. aPager laesst keine

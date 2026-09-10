@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-# apager - aPager-Alarme aus dem Tailnet auf dem Mac anzeigen
+# apager - aPager-Alarme ueber Tailscale Serve auf dem Mac anzeigen
 set -euo pipefail
 
 # Warum es dieses Skript gibt: aPager PRO setzt den Webhook vom Handy ab, nicht
 # von einem Server. Der Mac braucht deshalb keine oeffentliche Erreichbarkeit —
-# ein Listener, der ausschliesslich an die Tailscale-Adresse bindet, genuegt.
+# aber er braucht HTTPS. iOS App Transport Security laesst "http://" gar nicht
+# erst zu; aPager scheitert daran vor jedem Verbindungsversuch
+# (NSURLErrorDomain Code=-1022).
+#
+# Deshalb steht Tailscale Serve vor dem Listener: es terminiert HTTPS mit dem
+# echten *.ts.net-Zertifikat, laesst nur authentifizierte Tailnet-Gegenstellen
+# herein und leitet nach 127.0.0.1 weiter. Nur Serve, nie Funnel — Funnel
+# stellte den Alarmendpunkt ins oeffentliche Internet.
 #
 # Der Mac ist Anzeige, nicht Alarmierung: kein Ton, keine Benachrichtigung,
 # kein Wecken. Schlaeft er, verpasst er den Alarm. Alarmiert wird ueber das
@@ -28,15 +35,33 @@ BOUND="$STATE_DIR/bound"
 # schreibt, die davon abhaengt.
 PYTHON="/usr/bin/python3"
 
+# Der Shim der Tailscale-App. Homebrews /opt/homebrew/bin/tailscale existiert
+# hier ebenfalls, zeigt aber auf eine eigene Version und warnt bei jedem Aufruf
+# ueber einen Client/Daemon-Versionsunterschied.
+TAILSCALE="/usr/local/bin/tailscale"
+
+# Wohin Serve weiterleitet und woran der Listener horcht. Nicht die eigene
+# Tailnet-Adresse des Knotens: dorthin weitergeleiteter Verkehr laeuft zurueck
+# durch den Tailscale-Stack und blockiert. Gemessen auf diesem Rechner —
+# Loopback-Backend 200 in 25 ms, eigenes Tailnet-Backend Timeout nach 20 s.
+LISTEN_ADDRESS="127.0.0.1"
+DEFAULT_PORT="8787"
+
+# Der Pfad, ueber den "status" die ganze Kette prueft. Er braucht kein Token
+# und der Listener beantwortet ihn mit 204, ohne eine Zeile zu schreiben —
+# sonst zaehlte jede Statusabfrage als abgewiesene Anfrage und verdaerbe genau
+# die Zahl, an der ein veraltetes Token auffliegt.
+HEALTH_PATH="/healthz"
+
 usage() {
   cat <<'EOF'
-apager - aPager-Alarme aus dem Tailnet auf dem Mac anzeigen
+apager - aPager-Alarme ueber Tailscale Serve auf dem Mac anzeigen
 
-  apager install      Config und LaunchAgent anlegen, Listener starten
-  apager uninstall    LaunchAgent entfernen (Config und Protokolle bleiben)
-  apager status       Laeuft der Agent, woran haengt er, wann kam der letzte Alarm
-  apager url          Die URL, die in aPager einzutragen ist
-  apager test         Einen Testalarm ueber das Tailnet schicken
+  apager install      Config, LaunchAgent und Tailscale Serve einrichten
+  apager uninstall    LaunchAgent und Serve entfernen (Config und Protokolle bleiben)
+  apager status       Laeuft der Agent, kommt HTTPS durch, wann kam der letzte Alarm
+  apager url          Die HTTPS-URL, die in aPager einzutragen ist
+  apager test         Einen Testalarm ueber HTTPS durch Serve schicken
   apager logs         Die letzten Alarme anzeigen
   apager logs -f      Dem Protokoll folgen
   apager logs --listener   Betriebsmeldungen des Listeners anzeigen
@@ -49,6 +74,10 @@ Zwei Protokolle, und sie beantworten verschiedene Fragen:
 
 Ein Alarm, der wegen eines veralteten Tokens mit 404 abprallt, steht nur im
 listener.log — "apager status" zaehlt solche Faelle deshalb mit.
+
+Der Endpunkt ist HTTPS, und das ist keine Wahl: iOS App Transport Security
+laesst "http://" nicht zu. Tailscale Serve terminiert TLS und leitet nach
+127.0.0.1 weiter — nur im Tailnet, nie per Funnel.
 
 Der Mac ist Anzeige, nicht Alarmierung: kein Ton, keine Benachrichtigung, kein
 Wecken. Schlaeft der Rechner, verpasst er den Alarm — alarmiert wird ueber das
@@ -124,9 +153,16 @@ listener_last_line() {
   tail -1 "$LISTENER_LOG"
 }
 
-# Die eigene Tailscale-Adresse, mit denselben zwei Bedingungen wie im Listener:
-# utun-Interface und der echte Bereich 100.64.0.0/10. Ein blosses "inet 100."
-# traefe 100.0.0.0/8 und damit weit mehr, als Tailscale je vergibt.
+# Die eigene Tailscale-Adresse. Der Listener kennt sie nicht mehr — er bindet
+# auf Loopback —, aber "status" braucht sie weiterhin: sie unterscheidet, warum
+# die HTTPS-Pruefung rot ist. Tailscale unten, Serve falsch eingerichtet oder
+# Listener tot sehen sonst gleich aus.
+#
+# Ueber ifconfig statt ueber das CLI, weil es hier auf eine billige, nie
+# blockierende lokale Auskunft ankommt. Zwei Bedingungen: utun-Interface und
+# der echte Bereich 100.64.0.0/10. Ein blosses "inet 100." traefe 100.0.0.0/8
+# und damit weit mehr, als Tailscale je vergibt; die Interface-Bedingung haelt
+# die CGNAT-Adresse heraus, die ein per Mobilfunk getethertes en0 traegt.
 tailscale_address() {
   /sbin/ifconfig -a 2>/dev/null | awk '
     /^[^[:space:]]/ { iface = $1; sub(/:$/, "", iface); next }
@@ -144,6 +180,75 @@ listener_alive() {
   else
     bash -c "echo > /dev/tcp/${addr%:*}/${addr##*:}" 2>/dev/null
   fi
+}
+
+# --- Tailscale abfragen ------------------------------------------------------
+
+# Jeder Aufruf des tailscale-CLI laeuft hier durch, und zwar mit Zeitschranke:
+# der App-Store-Build blockiert Aufrufe gelegentlich minutenlang. Ohne Schranke
+# haengt "apager status" genau dann, wenn jemand wissen will, ob ein Alarm
+# ankaeme. Fehlt "timeout" (frisches macOS ohne coreutils), laeuft der Aufruf
+# ungebremst — schlechter als mit, aber immer noch eine Auskunft.
+#
+# Rueckgabe 127 heisst "kein CLI da". Die Aufrufer machen daraus "unbekannt"
+# und nie "nicht eingerichtet": eine Frage, die nicht gestellt werden konnte,
+# darf nicht als beantwortet erscheinen.
+tailscale_cli() {
+  [[ -x "$TAILSCALE" ]] || return 127
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 10 "$TAILSCALE" "$@" 2>/dev/null
+  else
+    "$TAILSCALE" "$@" 2>/dev/null
+  fi
+}
+
+# Der eigene MagicDNS-Name, ohne den Punkt am Ende. Er steht nirgends in diesem
+# Repo: .dotfiles ist oeffentlich, der Tailnet-Name gehoert nicht hinein — also
+# wird er zur Laufzeit erfragt.
+tailscale_dns_name() {
+  tailscale_cli status --json | "$PYTHON" -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except ValueError:
+    raise SystemExit(1)
+name = (data.get("Self") or {}).get("DNSName", "").rstrip(".")
+print(name)
+' 2>/dev/null || true
+}
+
+# "<backend>\t<funnel>" fuer Port 443, beides leer bzw. "nein", wenn nichts
+# eingerichtet ist. Funnel wird mitgelesen, weil es der eine Zustand ist, den
+# niemand versehentlich bemerken darf: er stellt den Alarmendpunkt ins
+# oeffentliche Internet.
+serve_summary() {
+  tailscale_cli serve status --json | "$PYTHON" -c '
+import json, sys
+try:
+    data = json.load(sys.stdin)
+except ValueError:
+    raise SystemExit(1)
+backend = ""
+funnel = "nein"
+for host, entry in sorted((data.get("Web") or {}).items()):
+    if not host.endswith(":443"):
+        continue
+    handler = (entry.get("Handlers") or {}).get("/") or {}
+    backend = handler.get("Proxy", "")
+    if backend:
+        break
+if data.get("AllowFunnel"):
+    funnel = "ja"
+print("{}\t{}".format(backend, funnel))
+' 2>/dev/null || true
+}
+
+# Die eine Zeile, die wirklich beantwortet, ob ein Alarm ankaeme: eine echte
+# HTTPS-Anfrage von aussen an den eigenen Knotennamen, ueber Serve, bis zum
+# antwortenden Listener. TLS, Zertifikat, Weiterleitung und Listener haengen
+# alle daran. Ausgabe ist der HTTP-Code, "000" wenn keine Antwort kam.
+https_probe() {
+  curl -sS --max-time 8 -o /dev/null -w '%{http_code}' "https://$1$HEALTH_PATH" 2>/dev/null || true
 }
 
 # --- Aktionen ----------------------------------------------------------------
@@ -248,34 +353,69 @@ PLIST_EOF
     die "LaunchAgent NICHT geladen — kein Listener laeuft, Alarme kommen gerade nicht an. launchd: ${bootstrap_err:-Dienst nach bootstrap nicht auffindbar}. Sofort erneut versuchen: apager install"
   fi
 
+  install_serve
+
   do_url
+}
+
+# Serve gehoert zur Installation, nicht daneben: ein Listener ohne Serve davor
+# bekommt nichts zu sehen, weil aPager kein Klartext-HTTP absetzen kann. Wer
+# nur den LaunchAgent laedt, hat einen Dienst, der laeuft und nie etwas
+# empfaengt — genau das Fehlerbild, gegen das dieses Werkzeug gebaut ist.
+install_serve() {
+  local port
+  port="$(config_value APAGER_PORT)" || true
+  [[ -n "$port" ]] || port="$DEFAULT_PORT"
+
+  if [[ ! -x "$TAILSCALE" ]]; then
+    printf 'ACHTUNG: %s fehlt — Tailscale Serve NICHT eingerichtet.\n' "$TAILSCALE"
+    printf '         Ohne Serve nimmt niemand HTTPS an, und etwas anderes kann aPager nicht.\n\n'
+    return
+  fi
+
+  # --bg, weil serve sonst im Vordergrund bliebe und die Konfiguration mit dem
+  # Ende des Befehls wieder verschwaende. --https=443 und nie funnel: der
+  # Endpunkt bleibt im Tailnet.
+  if tailscale_cli serve --bg --https=443 "http://$LISTEN_ADDRESS:$port" >/dev/null; then
+    printf 'Tailscale Serve: HTTPS/443 -> http://%s:%s (nur Tailnet, kein Funnel)\n\n' \
+      "$LISTEN_ADDRESS" "$port"
+  else
+    printf 'ACHTUNG: "tailscale serve" fehlgeschlagen — HTTPS-Anfragen erreichen niemanden.\n'
+    printf '         Von Hand pruefen: %s serve status\n\n' "$TAILSCALE"
+  fi
 }
 
 do_uninstall() {
   launchctl bootout "$SERVICE" 2>/dev/null || true
   rm -f "$PLIST"
-  printf 'LaunchAgent entfernt. Config und Protokolle bleiben:\n  %s\n  %s\n' \
+  # Sonst bliebe ein Proxy stehen, der auf einen Port zeigt, an dem nichts mehr
+  # horcht: HTTPS-Anfragen liefen weiter ins Leere statt sichtbar zu scheitern.
+  if [[ -x "$TAILSCALE" ]]; then
+    tailscale_cli serve --https=443 off >/dev/null || \
+      printf 'Hinweis: "tailscale serve --https=443 off" schlug fehl, Serve steht moeglicherweise noch.\n'
+  fi
+  printf 'LaunchAgent und Tailscale Serve entfernt. Config und Protokolle bleiben:\n  %s\n  %s\n' \
     "$CONFIG" "$ALARM_LOG"
 }
 
 do_url() {
-  local token port bound
+  local token dns
   token="$(config_value APAGER_TOKEN)" || die "keine Config — erst 'apager install'"
   [[ -n "$token" ]] || die "APAGER_TOKEN fehlt in $CONFIG"
-  port="$(config_value APAGER_PORT)"
-  bound="$(bound_address)"
+  dns="$(tailscale_dns_name)"
 
-  if [[ -n "$bound" ]] && listener_alive "$bound"; then
-    printf 'In aPager als Ziel eintragen:\n\n  http://%s/alarm/%s\n\n' "$bound" "$token"
+  if [[ -n "$dns" ]]; then
+    printf 'In aPager als Ziel eintragen:\n\n  https://%s/alarm/%s\n\n' "$dns" "$token"
   else
-    if [[ -n "$bound" ]]; then
-      printf 'Veraltete Datei: sie nennt %s, aber dort antwortet niemand.\n' "$bound"
-    else
-      printf 'Der Listener haengt gerade an keiner Adresse (Tailscale aus?).\n'
-    fi
-    printf 'Sobald er gebunden ist, lautet die URL:\n\n  http://<tailscale-adresse>:%s/alarm/%s\n\n' \
-      "$port" "$token"
+    # Lieber die Platzhalterform als eine halb echte URL: eine URL, die richtig
+    # aussieht und den falschen Knoten nennt, ist schlimmer als sichtbar keine.
+    printf 'Der Knotenname ist gerade nicht zu ermitteln (Tailscale aus, oder %s fehlt).\n' \
+      "$TAILSCALE"
+    printf 'Sobald Tailscale laeuft, lautet die URL:\n\n  https://<knoten>.<tailnet>.ts.net/alarm/%s\n\n' \
+      "$token"
   fi
+  printf 'HTTPS ist Pflicht, keine Vorsichtsmassnahme: iOS App Transport Security\n'
+  printf 'laesst "http://" gar nicht erst zu (NSURLErrorDomain Code=-1022).\n'
   printf 'Das Token ist ein Geheimnis: Wer die URL hat, kann Alarme einspeisen.\n'
 }
 
@@ -302,8 +442,11 @@ do_status() {
     printf 'Listener      veraltete Datei (%s) — es antwortet niemand\n' "$bound"
   fi
 
-  # Ueber ifconfig statt ueber das tailscale-CLI: der App-Store-Build blockiert
-  # dessen Aufrufe gelegentlich minutenlang.
+  status_serve
+  status_https
+
+  # Diagnose, nicht Urteil: die HTTPS-Zeile darueber ist die Aussage. Diese
+  # hier sagt, woran es liegt, wenn jene rot ist.
   local ts
   ts="$(tailscale_address)"
   if [[ -n "$ts" ]]; then
@@ -338,31 +481,91 @@ do_status() {
   fi
 }
 
+# Zeigt Serve auf den Listener? Ein gebundener Listener ohne Serve davor
+# empfaengt nichts, und ein Serve auf das falsche Backend ebenso wenig — beides
+# saehe ohne diese Zeile aus wie ein gesunder Aufbau.
+status_serve() {
+  if [[ ! -x "$TAILSCALE" ]]; then
+    printf 'Serve         unbekannt — %s fehlt, nicht gefragt\n' "$TAILSCALE"
+    return
+  fi
+
+  local summary backend funnel port want
+  summary="$(serve_summary)"
+  backend="${summary%%$'\t'*}"
+  funnel="${summary#*$'\t'}"
+  port="$(config_value APAGER_PORT)" || true
+  [[ -n "$port" ]] || port="$DEFAULT_PORT"
+  want="http://$LISTEN_ADDRESS:$port"
+
+  if [[ -z "$summary" ]]; then
+    printf 'Serve         unbekannt — tailscale antwortet nicht\n'
+  elif [[ -z "$backend" ]]; then
+    printf 'Serve         nicht eingerichtet — HTTPS erreicht niemanden ("apager install")\n'
+  elif [[ "$backend" != "$want" ]]; then
+    # Der Fall, der das hier ueberhaupt noetig gemacht hat: ein Backend auf der
+    # eigenen Tailnet-Adresse laeuft zurueck durch den Tailscale-Stack und
+    # blockiert, waehrend alles andere gruen bleibt.
+    printf 'Serve         zeigt auf %s, erwartet %s\n' "$backend" "$want"
+  else
+    printf 'Serve         HTTPS/443 -> %s\n' "$backend"
+  fi
+
+  if [[ "$funnel" == "ja" ]]; then
+    printf 'Serve         WARNUNG: Funnel ist an — der Alarmendpunkt steht im Internet.\n'
+    printf '              Abschalten: %s funnel --https=443 off\n' "$TAILSCALE"
+  fi
+}
+
+# Die einzige Zeile, die die ganze Kette wirklich anfasst: TLS, Zertifikat,
+# Serve, Weiterleitung, antwortender Listener. Alles darueber kann gruen sein,
+# waehrend hier nichts durchkommt.
+status_https() {
+  local dns code
+  dns="$(tailscale_dns_name)"
+  if [[ -z "$dns" ]]; then
+    printf 'HTTPS         unbekannt — Knotenname nicht zu ermitteln, nicht geprueft\n'
+    return
+  fi
+
+  code="$(https_probe "$dns")"
+  case "$code" in
+    204) printf 'HTTPS         %s antwortet — ein Alarm kaeme an\n' "$dns" ;;
+    000|"") printf 'HTTPS         keine Antwort von %s — aPager erreicht den Mac nicht\n' "$dns" ;;
+    404) printf 'HTTPS         %s antwortet mit 404 — dort horcht ein aelterer Listener\n' "$dns" ;;
+    *)   printf 'HTTPS         %s antwortet mit %s statt 204 — dort horcht etwas anderes\n' "$dns" "$code" ;;
+  esac
+}
+
 do_test() {
-  local bound token
+  local bound token dns
+  # Zwei Stufen, und die Reihenfolge ist der Punkt: erst ueber Loopback, ob der
+  # Listener ueberhaupt lebt, dann ueber HTTPS den Weg, den aPager nimmt.
+  # Scheitert die zweite Stufe nach einer gelungenen ersten, liegt es an Serve
+  # oder Tailscale und nicht am Listener — ein Test, der nur eine Zahl liefert,
+  # liesse genau diese Unterscheidung offen.
   bound="$(bound_address)"
   [[ -n "$bound" ]] || die "der Listener haengt an keiner Adresse — 'apager status' zeigt warum"
   listener_alive "$bound" \
     || die "veraltete Datei ($bound) — der Listener antwortet nicht, 'apager status' zeigt warum"
   token="$(config_value APAGER_TOKEN)" || die "keine Config — erst 'apager install'"
   [[ -n "$token" ]] || die "APAGER_TOKEN fehlt in $CONFIG"
+  dns="$(tailscale_dns_name)"
+  [[ -n "$dns" ]] || die "Knotenname nicht zu ermitteln (Tailscale aus?) — 'apager status' zeigt mehr"
 
-  # Bewusst an die gebundene Tailscale-Adresse und nicht an 127.0.0.1: nur so
-  # laufen Bind, Herkunftspruefung und Tokenvergleich wirklich mit. Ueber
-  # Loopback waere der Test gruen, waehrend genau diese drei kaputt sind.
   local body
   body="TESTALARM $(date '+%H:%M:%S')
 Musterstrasse 12, Musterstadt
 Ausgeloest von: apager test"
 
-  printf 'Sende an http://%s/alarm/...\n' "$bound"
+  printf 'Sende an https://%s/alarm/...\n' "$dns"
   # -K - liest die URL (und damit das Token) aus einem Config-Stream auf
   # stdin statt als Kommandozeilenargument: als Argument stuende es fuer die
   # Laufzeit des Aufrufs in "ps" sichtbar fuer jeden Prozess auf der Maschine
   # — genau das verbietet CLAUDE.md fuer Geheimnisse.
-  curl -fsS --max-time 5 -X POST --data-binary "$body" -K - >/dev/null <<CURLCFG \
-    || die "der Listener hat nicht angenommen — 'apager logs' und $LISTENER_LOG ansehen"
-url = "http://$bound/alarm/$token"
+  curl -fsS --max-time 10 -X POST --data-binary "$body" -K - >/dev/null <<CURLCFG \
+    || die "ueber HTTPS kam nichts an, obwohl der Listener auf $bound antwortet — also Serve oder Tailscale. 'apager status' zeigt welches von beiden"
+url = "https://$dns/alarm/$token"
 CURLCFG
   printf 'Angenommen. Der Dialog sollte jetzt offen sein.\n'
 }

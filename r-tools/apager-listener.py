@@ -1,9 +1,14 @@
 #!/usr/bin/python3
-# apager-listener - nimmt aPager-Webhooks aus dem Tailnet entgegen und zeigt sie an
+# apager-listener - nimmt aPager-Webhooks von Tailscale Serve entgegen und zeigt sie an
 """Listener fuer aPager-Alarme.
 
-Laeuft unter launchd. Der Mac ist hier Anzeige und keine Alarmierung: kein Ton,
-keine Benachrichtigung, kein Wecken. Wer schlaeft, verpasst den Alarm — das ist
+Laeuft unter launchd und horcht ausschliesslich auf 127.0.0.1. Vor ihm steht
+Tailscale Serve: es terminiert HTTPS mit dem echten *.ts.net-Zertifikat, laesst
+nur authentifizierte Tailnet-Gegenstellen herein und leitet nach Loopback
+weiter. Der Listener selbst ist damit von keinem Netz aus erreichbar.
+
+Der Mac ist hier Anzeige und keine Alarmierung: kein Ton, keine
+Benachrichtigung, kein Wecken. Wer schlaeft, verpasst den Alarm — das ist
 Absicht, alarmiert wird ueber das Handy.
 
 Siehe docs/2026-09-10-apager-design.md.
@@ -19,97 +24,33 @@ import signal
 import subprocess
 import sys
 import threading
-import time
 from collections import namedtuple
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# Tailscale vergibt aus dem CGNAT-Bereich; die IPv6-Adressen stammen aus dem
-# festen ULA-Praefix des Dienstes.
-TAILNET_V4 = ipaddress.ip_network("100.64.0.0/10")
-TAILNET_V6 = ipaddress.ip_network("fd7a:115c:a1e0::/48")
-
-# Absolut, weil launchd einen minimalen PATH setzt.
-IFCONFIG = "/sbin/ifconfig"
-
-# Tailscale legt auf macOS immer ein utun-Interface an — der App-Store-Build
-# ueber eine Netzwerkerweiterung ebenso wie der eigenstaendige Daemon.
-TAILSCALE_IFACE = "utun"
-
 Alarm = namedtuple("Alarm", "received_at text")
 
-# Eine Interface-Zeile beginnt in Spalte 0 ("en0: flags=..."), eine
-# Adresszeile ist eingerueckt. Das Leerzeichen hinter "inet" haelt "inet6"
-# heraus.
-_IFACE_RE = re.compile(r"^([^\s:]+):")
-_INET_RE = re.compile(r"^\s+inet (\d+\.\d+\.\d+\.\d+)\b")
 
+def is_loopback_ip(addr):
+    """Kommt die Anfrage von dieser Maschine selbst? Muell ergibt False.
 
-def is_tailnet_ip(addr):
-    """Liegt die Adresse im Tailnet? Muell ergibt False statt einer Ausnahme."""
+    Die Pruefung hat sich mit der Architektur umgedreht. Frueher band der
+    Listener an die Tailscale-Adresse und liess nur Absender aus
+    100.64.0.0/10 zu; heute bindet er auf 127.0.0.1, und jede legitime
+    Anfrage kommt aus dem lokalen Tailscale-Serve-Proxy. Eine Quelle, die
+    nicht Loopback ist, kann es bei diesem Bind gar nicht geben — taucht doch
+    eine auf, laeuft etwas anderes als gedacht, und das gehoert abgewiesen
+    und protokolliert statt angenommen.
+
+    127.0.0.0/8 gilt vollstaendig: der ganze Bereich verlaesst die Maschine
+    nicht. IPv4-mapped (::ffff:127.0.0.1) faellt bewusst durch — bei einem
+    Bind auf 127.0.0.1 kann diese Form nicht ankommen.
+    """
     try:
         parsed = ipaddress.ip_address(addr)
     except ValueError:
         return False
-    if parsed.version == 4:
-        return parsed in TAILNET_V4
-    return parsed in TAILNET_V6
-
-
-def parse_ifconfig_addresses(text):
-    """(Interface, IPv4-Adresse) je Adresse, in Reihenfolge des Auftretens.
-
-    Das Interface gehoert zwingend dazu: die Adresse allein sagt nicht, ob sie
-    von Tailscale stammt — siehe tailnet_address().
-    """
-    pairs = []
-    iface = ""
-    for line in text.splitlines():
-        head = _IFACE_RE.match(line)
-        if head:
-            iface = head.group(1)
-            continue
-        addr = _INET_RE.match(line)
-        if addr:
-            pairs.append((iface, addr.group(1)))
-    return pairs
-
-
-def tailnet_address(ifconfig_output=None):
-    """Die eigene Tailscale-Adresse, oder None wenn Tailscale gerade nicht laeuft.
-
-    Es zaehlt nur eine Tailnet-Adresse auf einem utun-Interface, und das ist
-    keine Kosmetik: 100.64.0.0/10 ist der CGNAT-Bereich der Mobilfunkanbieter.
-    Tethert der Mac ueber einen Carrier, der CGNAT einsetzt, traegt en0 eine
-    Adresse aus genau diesem Bereich — und steht in der ifconfig-Ausgabe vor
-    utun. Wer die erste passende Adresse nimmt, bindet den Listener dann ans
-    Mobilfunk-Interface: der Alarm vom Handy laeuft ins Leere, waehrend
-    "status" gebunden und verbunden meldet. Genau die Lage, in der jemand sich
-    auf das Ding verlaesst.
-
-    Deshalb lieber gar nicht binden als falsch. Findet sich keine Adresse auf
-    utun, wartet der Listener — "keine Tailscale-Adresse" ist eine sichtbare
-    Aussage, ein falsches Interface ist keine.
-
-    Bewusst ueber ifconfig statt ueber das tailscale-CLI: der App-Store-Build
-    blockiert dessen Aufrufe gelegentlich minutenlang, und ein blockierender
-    Aufruf in der Bind-Schleife waere von "kein Tailscale" nicht zu unterscheiden.
-    """
-    if ifconfig_output is None:
-        try:
-            ifconfig_output = subprocess.run(
-                [IFCONFIG, "-a"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
-            ).stdout
-        except (OSError, subprocess.SubprocessError):
-            return None
-    for iface, addr in parse_ifconfig_addresses(ifconfig_output):
-        if iface.startswith(TAILSCALE_IFACE) and is_tailnet_ip(addr):
-            return addr
-    return None
+    return parsed.is_loopback
 
 
 def token_from_path(path):
@@ -406,7 +347,7 @@ def _parse_content_length(headers):
     return length if length >= 0 else None
 
 
-def make_handler(token, display, alarm_log, allow_source=is_tailnet_ip, on_event=None):
+def make_handler(token, display, alarm_log, allow_source=is_loopback_ip, on_event=None):
     """Baut die Handler-Klasse. Alles Veraenderliche kommt ueber Closures herein,
     damit der Handler ohne globalen Zustand testbar bleibt."""
     notify = on_event or (lambda message: None)
@@ -453,6 +394,25 @@ def make_handler(token, display, alarm_log, allow_source=is_tailnet_ip, on_event
                     redact_path(fmt % args, token), command, redact_path(where, token)
                 )
             )
+
+        def _health(self):
+            """Antwortet "apager status", ohne eine Spur zu hinterlassen.
+
+            Der Pfad braucht kein Token: er transportiert keine Alarmdaten und
+            verraet nichts, was ein Tailnet-Mitglied nicht ohnehin sieht. Er
+            braucht aber zwingend seine eigene Antwort *vor* dem
+            Tokenvergleich — sonst zaehlte jede Statusabfrage als abgewiesene
+            Anfrage, und genau diese Zahl ist das Signal, an dem ein veraltetes
+            Token auffliegt. Eine Anzeige, die ihr eigenes Nachsehen als
+            Stoerung protokolliert, ist schlimmer als gar keine.
+
+            204 statt 200 mit Inhalt: hier ist nichts zu lesen, nur zu
+            beantworten.
+            """
+            self._responded = True
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def _reject(self, reason, status=404):
             notify("abgewiesen: {} ({} {})".format(reason, self.command, redact_path(self.path, token)))
@@ -525,7 +485,10 @@ def make_handler(token, display, alarm_log, allow_source=is_tailnet_ip, on_event
         def _dispatch(self, method):
             source = self.client_address[0]
             if not allow_source(source):
-                self._reject("Quelle ausserhalb des Tailnets")
+                self._reject("Quelle nicht lokal")
+                return
+            if method == "GET" and self.path.split("?", 1)[0] == HEALTH_PATH:
+                self._health()
                 return
             if not token_matches(self.path, token):
                 self._reject("Token stimmt nicht")
@@ -576,13 +539,17 @@ BOUND_FILE = STATE_DIR / "bound"
 
 DEFAULT_PORT = 8787
 
-# Wie lange zwischen zwei Versuchen gewartet wird, wenn Tailscale nicht laeuft
-# oder der Port belegt ist. Kurz genug, dass ein Wiederanlauf nicht auffaellt.
-RETRY_SECONDS = 5
+# Die einzige Adresse, auf die dieser Listener je bindet. Nicht 0.0.0.0, nicht
+# die Tailscale-Adresse, kein anderes Interface: davor steht Tailscale Serve,
+# und dessen Backend darf nicht die eigene Tailnet-Adresse des Knotens sein —
+# der weitergeleitete Verkehr liefe dann zurueck durch den Tailscale-Stack und
+# blockierte (gemessen: Loopback 200 in 25 ms, eigene Tailnet-Adresse Timeout
+# nach 20 s). Siehe docs/2026-09-10-apager-design.md.
+BIND_ADDRESS = "127.0.0.1"
 
-# Wie oft die gebundene Adresse geprueft wird. Ein Wechsel ist selten; haeufiger
-# nachzusehen kostet nur Strom.
-ADDRESS_CHECK_SECONDS = 15
+# Der Pfad, ueber den "apager status" die ganze Kette prueft: TLS, Serve,
+# Weiterleitung, antwortender Listener. Siehe _health() im Handler.
+HEALTH_PATH = "/healthz"
 
 _CONFIG_RE = re.compile(r'^\s*([A-Z_][A-Z0-9_]*)\s*=\s*"?([^"]*)"?\s*$')
 
@@ -604,16 +571,18 @@ def read_config(path):
 
 
 def serve(address, port, token, display, alarm_log, bound_file, on_event):
-    """Bedient Requests auf genau einer Adresse, bis sie verschwindet.
+    """Bindet und bedient Requests, bis der Prozess beendet wird.
 
-    Kehrt zurueck, wenn die Adresse wegfaellt oder sich aendert; die aufrufende
-    Schleife sucht dann eine neue. Ein Ausweichen auf 0.0.0.0 findet nie statt.
+    Kehrt nur ueber SIGTERM zurueck (als SystemExit durch das finally) oder
+    sofort mit dem OSError vom Bind. Fruehere Fassungen ueberwachten hier die
+    gebundene Adresse und banden bei einem Wechsel neu — das war die Antwort
+    darauf, dass die Tailscale-Adresse kommt und geht. Loopback tut das nicht,
+    also gibt es nichts zu ueberwachen; eine Schleife, die auf eine Bedingung
+    wartet, die immer erfuellt ist, ist kein Sicherheitsnetz, sondern
+    Irrefuehrung.
 
-    Gibt None zurueck, wenn regulaer gebunden war, sonst den OSError vom Bind.
-    Das Protokollieren des Bindfehlers gehoert bewusst dem Aufrufer: nur der
-    sieht ueber die Versuche hinweg, ob sich etwas geaendert hat. Alle fuenf
-    Sekunden "Port belegt" in ein Protokoll zu schreiben, das niemand rotiert,
-    macht die Datei gross und die Meldung wertlos.
+    Das Protokollieren des Bindfehlers gehoert bewusst dem Aufrufer: nur er
+    weiss, ob daraufhin noch etwas versucht wird oder der Prozess endet.
     """
     handler = make_handler(token, display, alarm_log, on_event=on_event)
     try:
@@ -621,26 +590,24 @@ def serve(address, port, token, display, alarm_log, bound_file, on_event):
     except OSError as exc:
         return exc
 
-    on_event("gebunden an {}:{}".format(address, port))
+    # Der tatsaechlich gebundene Port, nicht der erbetene: bei Port 0 waere
+    # sonst ":0" die Auskunft, und "status" laese eine Adresse vor, an der nie
+    # jemand horchte.
+    bound_port = httpd.server_address[1]
+    on_event("gebunden an {}:{}".format(address, bound_port))
     try:
         bound_file.parent.mkdir(parents=True, exist_ok=True)
-        bound_file.write_text("{}:{}\n".format(address, port), encoding="utf-8")
+        bound_file.write_text("{}:{}\n".format(address, bound_port), encoding="utf-8")
     except OSError as exc:
         on_event("bound-Datei nicht schreibbar: {}".format(exc))
 
-    # Start liegt in diesem try, nicht davor: schlaegt er fehl, muss dasselbe
-    # finally httpd wieder schliessen und die bound-Datei aufraeumen statt die
-    # Ausnahme unbehandelt durchzureichen.
+    # serve_forever() laeuft im Hauptthread, damit SIGTERM ihn erreicht: der
+    # Handler wirft SystemExit, die aus dem select() herausfaellt und das
+    # finally unten durchlaeuft. In einem Nebenthread bliebe die bound-Datei
+    # stehen und wiese einen toten Listener als lebendig aus.
     try:
-        worker = threading.Thread(target=httpd.serve_forever, daemon=True)
-        worker.start()
-        while True:
-            time.sleep(ADDRESS_CHECK_SECONDS)
-            if tailnet_address() != address:
-                on_event("Tailscale-Adresse hat sich geaendert oder ist weg")
-                return
+        httpd.serve_forever()
     finally:
-        httpd.shutdown()
         httpd.server_close()
         try:
             bound_file.unlink()
@@ -719,37 +686,24 @@ def main():
 
     display = AlarmDisplay(on_error=lambda exc: logging.error("Anzeige: %s", exc))
 
-    # Nur bei Zustandswechsel protokollieren. Alle fuenf Sekunden "kein
-    # Tailscale" zu schreiben, macht die Datei gross und die Meldung wertlos.
-    last_state = None
-    last_bind_error = None
-    while True:
-        address = tailnet_address()
-        if address is None:
-            if last_state != "down":
-                logging.info("keine Tailscale-Adresse — warte")
-                last_state = "down"
-            time.sleep(RETRY_SECONDS)
-            continue
-        last_state = "up"
-        bind_error = serve(
-            address=address,
-            port=port,
-            token=token,
-            display=display,
-            alarm_log=ALARM_LOG,
-            bound_file=BOUND_FILE,
-            on_event=logging.info,
-        )
-        if bind_error is None:
-            last_bind_error = None
-        else:
-            # Dieselbe Zustandswechsel-Regel wie beim Tailscale-Zweig darueber.
-            message = "Bind auf {}:{} fehlgeschlagen: {}".format(address, port, bind_error)
-            if message != last_bind_error:
-                logging.error("%s", message)
-                last_bind_error = message
-        time.sleep(RETRY_SECONDS)
+    bind_error = serve(
+        address=BIND_ADDRESS,
+        port=port,
+        token=token,
+        display=display,
+        alarm_log=ALARM_LOG,
+        bound_file=BOUND_FILE,
+        on_event=logging.info,
+    )
+    if bind_error is None:
+        return 0
+    # Ein belegter Loopback-Port ist ein anhaltender Zustand, kein
+    # Wackelkontakt: hier zu warten und stumm weiterzuversuchen hiesse, einen
+    # nicht laufenden Listener zu verbergen. KeepAlive im LaunchAgent startet
+    # neu, jeder Versuch schreibt diese Zeile, und "apager status" liest sie
+    # als letzte Zeile des listener.log vor.
+    logging.error("Bind auf %s:%s fehlgeschlagen: %s", BIND_ADDRESS, port, bind_error)
+    return 1
 
 
 if __name__ == "__main__":

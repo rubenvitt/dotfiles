@@ -19,9 +19,16 @@ Statusabfragen, Alarmhistorie über das Logfile hinaus.
 
 ## Ausgangslage
 
-- aPager PRO läuft auf dem Handy und setzt den HTTP-Request selbst ab. Es gibt
+- aPager PRO läuft auf dem Handy und setzt den Request selbst ab. Es gibt
   keinen Server, der sendet — deshalb braucht der Mac keine öffentliche
-  Erreichbarkeit, kein Zertifikat und keinen Tunnel.
+  Erreichbarkeit und keinen Tunnel.
+- **HTTPS ist Pflicht, nicht Kür.** iOS App Transport Security verbietet
+  Klartext-HTTP: aPager scheitert an einer `http://`-URL mit
+  `NSURLErrorDomain Code=-1022`, *bevor* eine Verbindung zustande kommt — kein
+  Eintrag im Listener-Log, kein TCP-Connect, nichts. Im `listener.log` standen
+  stattdessen acht rohe TLS-Handshakes gegen den Klartext-Port (`Bad request
+  version '\x16\x03\x01…'`): die App hatte TLS längst versucht. Ein gültiges
+  Zertifikat für den Ziel-Hostnamen ist damit Voraussetzung, nicht Zusatz.
 - Handy und Mac hängen im selben Tailnet. Der Request läuft über Tailscale.
 - Das Payload-Format ist in aPager **nicht konfigurierbar** und derzeit
   unbekannt. Der Listener muss deshalb formatagnostisch starten.
@@ -50,6 +57,7 @@ sich die Anzeige ohne Netzwerk testen und der Listener ohne Bildschirm.
 | `r-tools/apager` | Dispatcher: `install`, `uninstall`, `status`, `test`, `logs`, `url` |
 | `r-tools/apager-listener.py` | HTTP-Listener, `/usr/bin/python3`, nur Standardbibliothek |
 | `~/Library/LaunchAgents/email.rubeen.apager.plist` | hält den Listener am Leben, startet ihn beim Login |
+| `tailscale serve --https=443` | terminiert HTTPS, lässt nur das Tailnet herein, leitet nach `127.0.0.1` weiter |
 | `~/.config/apager/config` | Port und Token — außerhalb des Repos |
 | `~/.local/state/apager/alarms.log` | Rohprotokoll aller eingegangenen Requests |
 | `~/.local/state/apager/listener.log` | Betriebsmeldungen des Listeners |
@@ -61,44 +69,86 @@ Datei.
 
 ## Netzwerk und Absicherung
 
-Der Endpunkt ist unverschlüsseltes HTTP. Innerhalb des Tailnets ist der
-Transport bereits verschlüsselt; nach außen darf der Port gar nicht erst
-sichtbar werden. Drei Maßnahmen, die zusammenwirken:
+**Tailscale Serve ist die Haustür, der Listener ist rein lokal.**
 
-1. **Bind nur auf die Tailscale-Adresse.** Der Listener bindet nie auf
-   `0.0.0.0`. Er ermittelt die Adresse aus dem Bereich `100.64.0.0/10`
-   **auf einem `utun`-Interface** — nicht über das `tailscale`-CLI, das im
-   App-Store-Build blockieren kann. Findet er keine, wartet er und versucht es
-   erneut, statt auf ein offenes Interface auszuweichen. In einem fremden WLAN
-   lauscht so schlicht nichts.
+```
+aPager (iPhone)  --HTTPS-->  Tailscale Serve  --HTTP-->  127.0.0.1:<port>
+                  Tailnet     TLS + Auth                  Listener
+```
 
-   Das Interface ist Teil der Bedingung, nicht Beiwerk: `100.64.0.0/10` ist der
-   CGNAT-Bereich der Mobilfunkanbieter. Tethert der Mac über einen Carrier mit
-   CGNAT, trägt `en0` eine Adresse aus genau diesem Bereich — und steht in der
-   `ifconfig`-Ausgabe vor `utun`. Eine Adressprüfung ohne Interface bände den
-   Listener dann ans Mobilfunk-Interface: der Alarm vom Handy liefe ins Leere,
-   während `status` gebunden und verbunden meldete. Eine Adresse aus dem
-   Bereich auf einem anderen Interface wird deshalb **nicht** ersatzweise
-   genommen — lieber gar nicht binden als falsch.
-2. **Token im Pfad.** Der Endpunkt lautet `/alarm/<token>`; das Token wird beim
+Vier Maßnahmen, die zusammenwirken:
+
+1. **Bind nur auf `127.0.0.1`.** Nie `0.0.0.0`, nie die Tailscale-Adresse, nie
+   ein anderes Interface. Der Listener ist damit von *keinem* Netz aus
+   erreichbar — auch nicht aus dem Tailnet. Loopback ist immer da, also gibt es
+   keine Warteschleife und kein Neubinden mehr: er bindet beim Start und bleibt
+   gebunden.
+2. **Tailscale Serve terminiert HTTPS.** `tailscale serve --bg --https=443
+   http://127.0.0.1:<port>`. Das Zertifikat ist ein echtes Let's-Encrypt-Zertifikat
+   für den `*.ts.net`-Namen des Knotens, ausgestellt und erneuert von Tailscale —
+   deshalb funktioniert es mit ATS, während ein selbstsigniertes es nicht täte.
+   **Serve, nie Funnel.** Funnel stellte denselben Endpunkt ins öffentliche
+   Internet; Serve lässt ausschließlich authentifizierte Tailnet-Gegenstellen
+   herein. Die Zugangskontrolle liegt damit bei Tailscale, wo sie besser
+   aufgehoben ist als in fünfzehn Zeilen Python.
+3. **Token im Pfad.** Der Endpunkt lautet `/alarm/<token>`; das Token wird beim
    `install` zufällig erzeugt. aPager erlaubt keine eigenen Header, deshalb der
-   Pfad. Der Vergleich läuft zeitkonstant.
-3. **Quell-IP-Prüfung.** Requests, deren Absender nicht aus `100.64.0.0/10`
-   stammt, werden verworfen und protokolliert.
+   Pfad. Der Vergleich läuft zeitkonstant. Das Token ist der zweite Faktor
+   *hinter* der Tailnet-Authentifizierung, nicht der einzige.
+4. **Quell-IP-Prüfung, umgedreht.** Früher war „aus `100.64.0.0/10`" die
+   zulässige Herkunft und Loopback verboten. Heute gilt das Gegenteil: nur
+   `127.0.0.1` und `::1` werden angenommen, alles andere verworfen und
+   protokolliert. Bei einem Bind auf Loopback *kann* eine andere Quelle nicht
+   regulär auftreten — taucht doch eine auf, läuft etwas anderes als gedacht.
 
-Fällt Tailscale aus, bindet der Listener nicht neu auf ein anderes Interface,
-sondern wartet. Ändert sich die Tailscale-Adresse, bindet er auf die neue.
+### Warum das Backend nicht die eigene Tailnet-Adresse sein darf
+
+Der naheliegende Weg — Serve auf die Adresse zeigen lassen, an der der Listener
+schon hing — funktioniert nicht. Auf diesem Rechner gemessen:
+
+| Backend | Ergebnis |
+|---|---|
+| `http://127.0.0.1:9999` | `HTTP 200` in 0,025 s |
+| `http://<eigene-tailnet-adresse>:8787` | **Timeout nach 20 s** |
+
+Weitergeleiteter Verkehr an die eigene Tailnet-Adresse läuft zurück durch den
+Tailscale-Stack und blockiert. Das Backend **muss** Loopback sein — und damit
+fällt der Grund weg, aus dem der Listener je an die Tailscale-Adresse band.
+
+### Was dadurch entfallen ist
+
+Die Adresssuche über `ifconfig`, die Bevorzugung von `utun`-Interfaces, die
+CGNAT-Bereichsprüfung und die Warte- und Neubinde-Schleife sind **ersatzlos
+gestrichen**. Sie beantworteten die Frage „welche Tailscale-Adresse gehört mir
+gerade", und die stellt sich nicht mehr. Eine ungenutzte Funktion „für alle
+Fälle" wäre hier keine Reserve, sondern ein zweiter, unerprobter Bindpfad neben
+dem einzigen, der laufen soll.
+
+`apager status` fragt weiterhin nach der Tailscale-Adresse — dort über
+`ifconfig` im Dispatcher, und als *Diagnose*, nicht als Urteil: sie
+unterscheidet, ob eine rote HTTPS-Zeile an Tailscale, an Serve oder am Listener
+liegt.
+
+### Zugabe: Serve sagt, wer geklopft hat
+
+Serve reicht die Identität der Gegenstelle als Header durch
+(`Tailscale-User-Login`, `X-Forwarded-For`, `X-Forwarded-Proto`). Sie landen
+über den Rohmitschnitt im `alarms.log`. Das war kein Ziel des Umbaus, ist aber
+mehr, als die alte Quell-IP-Prüfung je wusste.
 
 ## Datenfluss
 
-1. Alarm auf dem Handy, aPager sendet an `http://<tailscale-adresse>:<port>/alarm/<token>`.
-2. Listener prüft Quell-IP und Token. Bei Fehlschlag: Eintrag ins Log, `404`.
-3. Der vollständige Request — Methode, Pfad, Header, Body — wird mit Zeitstempel
+1. Alarm auf dem Handy, aPager sendet an `https://<knoten>.<tailnet>.ts.net/alarm/<token>`.
+2. Tailscale Serve terminiert TLS, prüft die Tailnet-Zugehörigkeit und leitet
+   nach `http://127.0.0.1:<port>` weiter.
+3. Listener prüft Quell-IP (nur Loopback) und Token. Bei Fehlschlag: Eintrag ins
+   Log, `404`.
+4. Der vollständige Request — Methode, Pfad, Header, Body — wird mit Zeitstempel
    nach `alarms.log` geschrieben. Das geschieht **vor** der Anzeige, damit ein
    Fehler in der Darstellung den Alarm nicht verschluckt.
-4. Der Listener fügt den Alarm seiner Liste offener Alarme hinzu.
-5. Anzeige öffnen oder aktualisieren (siehe unten).
-6. Quittieren leert die Liste.
+5. Der Listener fügt den Alarm seiner Liste offener Alarme hinzu.
+6. Anzeige öffnen oder aktualisieren (siehe unten).
+7. Quittieren leert die Liste.
 
 ## Anzeigeverhalten
 
@@ -130,10 +180,19 @@ Stichwort, Adresse, Meldung. Diese Erweiterung betrifft ausschließlich
 Das Fehlerbild, auf das es hier ankommt, ist der stille Ausfall: ein Alarm, der
 nicht ankommt, ohne dass es jemandem auffällt.
 
-- **Keine Tailscale-Adresse** — der Listener wartet in einer Schleife und
-  protokolliert jeden Zustandswechsel genau einmal, nicht bei jedem Versuch. Er
-  beendet sich nicht.
-- **Port belegt** — Meldung ins Log, erneuter Versuch nach Wartezeit.
+- **Serve fehlt oder zeigt aufs falsche Backend** — der Listener läuft, bindet
+  und empfängt nie etwas. Von innen ist das nicht zu sehen; `apager status`
+  liest deshalb die Serve-Konfiguration und vergleicht das Backend mit dem
+  konfigurierten Port.
+- **Tailscale unten** — Serve nimmt nichts an, HTTPS läuft ins Leere. Der
+  Listener merkt davon nichts und muss es auch nicht: er bindet weiter auf
+  Loopback und ist sofort wieder da, wenn Tailscale zurückkommt.
+- **Port belegt** — Meldung ins Log, Prozess endet mit Rückgabewert 1.
+  `KeepAlive` startet neu. Bewusst kein stilles Weiterversuchen in einer
+  Schleife: ein belegter Loopback-Port ist ein anhaltender Zustand, und ein
+  Prozess, der endlos wartet, sieht von außen aus wie einer, der läuft. Der
+  Preis ist eine wiederkehrende Fehlerzeile im `listener.log` — genau die,
+  die `status` als letzte Zeile vorliest.
 - **Anzeige schlägt fehl** — Meldung ins Log. Der Alarm steht bereits in
   `alarms.log` und ist über `apager logs` nachlesbar. Ein Ausweichen auf
   Benachrichtigung oder Ton findet nicht statt: Beide Kanäle wurden bewusst
@@ -153,24 +212,35 @@ nicht ankommt, ohne dass es jemandem auffällt.
   Alarm spurlos verschwinden. Diese Fehlerklasse ist deshalb strukturell
   geschlossen, nicht Fall für Fall.
 - **Listener stürzt ab** — `KeepAlive` im LaunchAgent startet ihn neu. Startet
-  er wegen fehlender Konfiguration wiederholt neu, unterscheidet `status` das
-  über die letzte Zeile des `listener.log` von „wartet auf Tailscale“ — beide
-  Zustände sahen von außen identisch aus.
+  er wegen fehlender Konfiguration oder eines belegten Ports wiederholt neu,
+  steht der Grund in der letzten Zeile des `listener.log`, die `status`
+  vorliest.
 
 ## Verifikation
 
-Die reinen Funktionen des Listeners — Adresserkennung, Tokenvergleich,
+Die reinen Funktionen des Listeners — Herkunftsprüfung, Tokenvergleich,
 Request-Rahmen, Anzeigelogik — hängen an `tests/test_apager_listener.py`,
 ausführbar mit `/usr/bin/python3 -m unittest discover -s tests`. Alles, was
 Netzwerk, launchd oder Bildschirm braucht, prüft das Tool selbst.
 
-- `apager test` schickt einen simulierten Alarm **an die tatsächlich gebundene
-  Tailscale-Adresse** und zeigt den Dialog wie im Ernstfall. Damit laufen Bind,
-  Quell-IP-Prüfung und Tokenvergleich wirklich mit — über Loopback wäre der
-  Test grün, während genau diese drei kaputt sind.
-- `apager status` beantwortet in einem Aufruf: Ist der Agent geladen, an welche
-  Adresse ist der Listener tatsächlich gebunden, ist Tailscale verbunden, wann
-  kam der letzte Alarm — **und wurde etwas abgewiesen**.
+- `apager test` schickt einen simulierten Alarm **über HTTPS an den eigenen
+  `ts.net`-Namen**, also durch Serve — denselben Weg, den aPager nimmt. Zwei
+  Stufen, und die Reihenfolge ist der Punkt: erst über Loopback prüfen, ob der
+  Listener lebt, dann über HTTPS. Scheitert die zweite Stufe nach einer
+  gelungenen ersten, liegt es an Serve oder Tailscale und nicht am Listener.
+- `apager status` beantwortet in einem Aufruf: Ist der Agent geladen, ist der
+  Listener gebunden, **steht Serve davor und kommt HTTPS wirklich durch**, ist
+  Tailscale verbunden, wann kam der letzte Alarm — **und wurde etwas
+  abgewiesen**.
+
+  Die HTTPS-Zeile ist die einzige, die die ganze Kette anfasst: eine echte
+  Anfrage an `https://<knoten>.<tailnet>.ts.net/healthz`, durch TLS, Serve und
+  Weiterleitung bis zum antwortenden Listener. Der Listener beantwortet diesen
+  Pfad mit `204` **ohne Token und ohne eine Zeile zu schreiben** — vor dem
+  Tokenvergleich. Andernfalls zählte jede Statusabfrage als abgewiesene Anfrage
+  und verdärbe genau die Zahl, an der ein veraltetes Token auffliegt: eine
+  Anzeige, die ihr eigenes Nachsehen als Störung protokolliert, ist schlimmer
+  als gar keine.
 
   Die letzte Frage ist keine Zugabe. Ein veraltetes Token (Neuinstallation,
   vertippte URL, verlorenes Zeichen beim Kopieren) lässt jeden echten Alarm mit
@@ -183,10 +253,10 @@ Netzwerk, launchd oder Bildschirm braucht, prüft das Tool selbst.
 - `shellcheck` über `apager`.
 
 **Wichtige Einschränkung:** Als verifiziert gilt die Installation erst, wenn
-ein echter Request vom Handy angekommen ist. `apager test` läuft zwar über das
-Tailnet, aber vom Mac aus — dass aPager auf dem Handy die URL richtig absetzt
-und in welchem Format, zeigt erst der Ernstfall. `status` gibt dafür die
-tatsächlich gebundene Adresse aus, nicht die konfigurierte.
+ein echter Request vom Handy angekommen ist. `apager test` läuft zwar über
+HTTPS durch Serve, aber vom Mac aus — dass aPager auf dem Handy die URL richtig
+absetzt und in welchem Format, zeigt erst der Ernstfall. Die Kette bis zum
+Listener ist damit bewiesen, die App auf dem Handy nicht.
 
 ## Offene Punkte
 

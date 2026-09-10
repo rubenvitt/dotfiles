@@ -16,6 +16,7 @@ Siehe docs/2026-09-10-apager-design.md.
 
 import hmac
 import ipaddress
+import json
 import logging
 import os
 import pathlib
@@ -220,9 +221,11 @@ class AlarmDisplay:
 
 MAX_BODY_BYTES = 64 * 1024
 
-# Wie viel vom lesbaren Inhalt im Dialog landet. Das Payload-Format ist
-# unbekannt; ein grosser JSON-Blob zoege sonst eine Textwand auf und schoebe
-# die Adresse aus dem Fenster. Vollstaendig steht alles im alarms.log.
+# Wie viel vom lesbaren Inhalt im Dialog landet. Der Deckel gilt fuer beides,
+# das Feld-pro-Zeile-Layout wie den Rohtext-Rueckfall: ein einzelnes riesiges
+# Feld (oder ein grosser Blob im Fallback-Fall) zoege sonst eine Textwand auf
+# und schoebe die Adresse aus dem Fenster. Vollstaendig steht alles im
+# alarms.log.
 DIALOG_MAX_CHARS = 2000
 
 # Eine Chunk-Groessenzeile ist ein paar Bytes lang. Der Deckel verhindert, dass
@@ -276,22 +279,75 @@ def _read_chunked(rfile, limit):
     return bytes(body), "ok"
 
 
-def readable_request(method, path, headers_text, body_bytes):
-    """Was im Dialog steht, solange das Feldmapping noch nicht existiert.
+# Wie weit ein Feldname im Dialog eingerueckt werden darf. Die Felder aus der
+# aPager-Konfiguration sind kurz ("keyword", "unit"); ein einzelner
+# ungewoehnlich langer Name soll trotzdem nicht jeden Wert aus dem sichtbaren
+# Bereich des Dialogs schieben.
+FIELD_NAME_PAD_CAP = 20
 
-    Das Payload-Format von aPager ist nicht konfigurierbar und derzeit
-    unbekannt. Bis der erste echte Alarm im Protokoll steht, zeigen wir alles
-    Lesbare — lieber zu viel als das falsche Feld.
+
+def _field_value_display(value):
+    """Ein Feldwert als Text fuer den Dialog.
+
+    Strings erscheinen ohne die JSON-Anfuehrungszeichen — die sind fuer einen
+    Menschen um 3 Uhr nachts nur Rauschen. Alles andere (Zahl, bool, null,
+    verschachteltes Objekt/Array) laeuft durch json.dumps: kompakt, garantiert
+    einzeilig, ohne Sonderfall pro JSON-Typ.
+    """
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _json_object_display(obj):
+    """Ein JSON-Objekt als 'Feldname  Wert'-Zeilen, ein Feld pro Zeile.
+
+    Reihenfolge bleibt die des Requests (json.loads erhaelt sie seit 3.7,
+    sortiert wird nicht). Ein Objekt ohne Felder liefert hier "" zurueck; der
+    Aufrufer faengt das ab, damit daraus kein leerer Dialogtext wird.
+    """
+    width = min(max((len(name) for name in obj), default=0), FIELD_NAME_PAD_CAP)
+    return "\n".join(
+        "{:<{width}}  {}".format(name, _field_value_display(value), width=width)
+        for name, value in obj.items()
+    )
+
+
+def _render_body(body_text):
+    """Der Body fuers Dialog: ein Feld pro Zeile, wenn er ein JSON-Objekt ist.
+
+    Alles andere — kein JSON, kaputtes JSON, ein JSON-Array oder -Skalar, ein
+    leeres Objekt — faellt zurueck auf die Rohanzeige. Dieses Projekt hat sich
+    an einer Formatannahme schon zweimal verschluckt (siehe is_loopback_ip,
+    redact_path); der Rueckfall hier ist deshalb keine Nebensaeche, sondern
+    das eigentliche Verhalten. Keine Ausnahme darf aus dieser Funktion
+    heraus: ein Alarm darf nie an einer Anzeige-Annahme scheitern.
+    """
+    try:
+        parsed = json.loads(body_text)
+        if not isinstance(parsed, dict) or not parsed:
+            return body_text
+        rendered = _json_object_display(parsed)
+        return rendered if rendered else body_text
+    except Exception:
+        return body_text
+
+
+def readable_request(method, path, headers_text, body_bytes):
+    """Was im Dialog steht.
+
+    Ein JSON-Objekt im Body wird Feld fuer Feld angezeigt (siehe
+    _render_body); alles andere unveraendert als Rohtext, wie schon vor dem
+    Feldmapping.
 
     method und headers_text werden noch nicht ausgewertet, stehen aber bewusst
-    schon in der Signatur: sobald das Feldmapping kommt, entscheidet der
-    Content-Type darueber, ob der Body als JSON, als Formulardaten oder als
-    Klartext zu lesen ist.
+    schon in der Signatur: eine kuenftige Erweiterung koennte den Content-Type
+    heranziehen, statt den Body blind als JSON zu versuchen.
     """
     body = body_bytes.decode("utf-8", errors="replace").strip()
     parts = []
     if body:
-        parts.append(body)
+        parts.append(_render_body(body))
     query = path.split("?", 1)[1] if "?" in path else ""
     if query:
         parts.append(query)

@@ -160,20 +160,40 @@ Listener den laufenden Dialog und öffnet einen neuen, der **alle** offenen
 Alarme untereinander zeigt, der jüngste oben. Ein Dialog pro Zeitpunkt, kein
 Fensterstapel. Quittieren gilt für alle gezeigten Alarme gemeinsam.
 
-Weil das Format unbekannt ist, zeigt die erste Ausbaustufe **Body und
-Query-String** des Requests, um einen Zeitstempel ergänzt. Die Header gehören
-bewusst nicht dazu: sie sagen über den Einsatz nichts und schöben die Adresse
-aus dem Fenster. Vollständig — Methode, Pfad, Header, Body — steht der Request
-im `alarms.log`.
+Das Format ist inzwischen bekannt: aPager schickt ein flaches JSON-Objekt,
+konfigurierbar in der App selbst (`{"keyword":"B3","unit":"unit1"}` beim
+ersten echten Alarm). Parst der Body als JSON-Objekt, zeigt der Dialog ein
+Feld pro Zeile, in der Reihenfolge, in der sie im Request standen — nicht
+sortiert, denn die Feldnamen kommen aus der Konfiguration des Nutzers und
+können sich ändern:
 
-Der Dialogtext ist zusätzlich bei rund 2 KB gekappt, mit sichtbarem Vermerk.
-Ein unbekanntes Format kann ein großer JSON-Blob sein, und eine Textwand ist
-bei einem Einsatzalarm schlechter als ein Ausschnitt. Das `alarms.log` bleibt
-ungekürzt.
+```
+keyword   B3
+unit      unit1
+```
 
-Sobald der erste echte Alarm im Log steht, wird daraus ein Feldmapping —
-Stichwort, Adresse, Meldung. Diese Erweiterung betrifft ausschließlich
-`apager-listener.py`; Dispatcher, LaunchAgent und Anzeigepfad bleiben unberührt.
+Die Feldnamen werden auf eine gemeinsame Breite aufgefüllt, damit die Werte
+untereinanderstehen; die Breite ist bei 20 Zeichen gedeckelt (`FIELD_NAME_PAD_CAP`
+in `apager-listener.py`), damit ein einzelner ungewöhnlich langer Feldname
+nicht alle Werte aus dem sichtbaren Bereich des Dialogs schiebt. Ein
+verschachtelter Wert (Objekt oder Array) erscheint kompakt und einzeilig statt
+mehrzeilig — sonst würde er die Ausrichtung der übrigen Zeilen zerreißen.
+
+Dieses Projekt hat sich an einer Formatannahme schon zweimal verschluckt
+(siehe `is_loopback_ip`, `redact_path`), deshalb bleibt der Rückfall
+Pflichtprogramm: Ist der Body kein JSON, kaputtes JSON, ein JSON-Array oder
+-Skalar statt eines Objekts, oder ein Objekt ohne Felder, zeigt der Dialog
+wie zuvor **Body und Query-String** roh an, um einen Zeitstempel ergänzt.
+Keine Ausnahme aus dieser Umwandlung darf je einen Alarm verschlucken. Die
+Header gehören bewusst nicht dazu: sie sagen über den Einsatz nichts und
+schöben die Adresse aus dem Fenster. Vollständig — Methode, Pfad, Header,
+Body, unformatiert — steht der Request weiterhin im `alarms.log`; nur die
+Dialoganzeige unterscheidet zwischen Feldlayout und Rohtext.
+
+Der Dialogtext ist zusätzlich bei rund 2 KB gekappt, mit sichtbarem Vermerk —
+sowohl im Feldlayout als auch im Rohtext-Rückfall. Ein einzelnes sehr großes
+Feld (oder ein großer Blob im Rückfall) ist bei einem Einsatzalarm schlechter
+als ein Ausschnitt. Das `alarms.log` bleibt ungekürzt.
 
 ## Fehlerbehandlung
 

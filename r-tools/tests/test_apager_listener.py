@@ -236,6 +236,115 @@ class TestDialogLength(unittest.TestCase):
         self.assertIn(body.decode("ascii"), record)
 
 
+class TestJsonFieldRendering(unittest.TestCase):
+    """Der reale Alarm kam als JSON-Objekt an: ein Feld pro Zeile statt Rohtext.
+
+    Jede Abweichung vom bekannten Fall -- kein JSON, kaputtes JSON, ein
+    JSON-Array/-Skalar -- muss auf die alte Rohanzeige zurueckfallen. Dieses
+    Projekt hat sich schon zweimal an einer Formatannahme verschluckt; der
+    Rueckfall ist hier keine Nebensaeche, sondern der Punkt.
+    """
+
+    def test_json_object_renders_one_line_per_field(self):
+        body = b'{"keyword":"B3","unit":"unit1"}'
+        text = listener.readable_request("POST", "/alarm/geheim", "", body)
+        lines = text.splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertRegex(lines[0], r"^keyword\s+B3$")
+        self.assertRegex(lines[1], r"^unit\s+unit1$")
+
+    def test_field_values_line_up(self):
+        body = b'{"keyword":"B3","unit":"unit1"}'
+        text = listener.readable_request("POST", "/alarm/geheim", "", body)
+        lines = text.splitlines()
+        # Der Wert beginnt in beiden Zeilen an derselben Spalte.
+        col0 = re.match(r"^\S+(\s+)", lines[0]).end()
+        col1 = re.match(r"^\S+(\s+)", lines[1]).end()
+        self.assertEqual(col0, col1)
+
+    def test_field_order_matches_the_json_not_sorted(self):
+        body = b'{"zebra":"1","apfel":"2"}'
+        text = listener.readable_request("POST", "/alarm/geheim", "", body)
+        self.assertLess(text.index("zebra"), text.index("apfel"))
+
+    def test_body_that_is_not_json_falls_back_to_raw_display(self):
+        text = listener.readable_request(
+            "POST", "/alarm/geheim", "", b"B3 Wohnungsbrand Musterstrasse"
+        )
+        self.assertEqual(text, "B3 Wohnungsbrand Musterstrasse")
+
+    def test_malformed_json_falls_back_to_raw_display(self):
+        body = b'{"keyword": "B3"'  # abgerissen, keine schliessende Klammer
+        text = listener.readable_request("POST", "/alarm/geheim", "", body)
+        self.assertEqual(text, body.decode("ascii"))
+
+    def test_json_array_falls_back_to_raw_display(self):
+        # Gueltiges JSON, aber kein Objekt -- es gibt keine Felder zu zeigen.
+        body = b"[1,2,3]"
+        text = listener.readable_request("POST", "/alarm/geheim", "", body)
+        self.assertEqual(text, "[1,2,3]")
+
+    def test_json_number_falls_back_to_raw_display(self):
+        text = listener.readable_request("POST", "/alarm/geheim", "", b"42")
+        self.assertEqual(text, "42")
+
+    def test_json_string_falls_back_to_raw_display(self):
+        text = listener.readable_request("POST", "/alarm/geheim", "", b'"B3"')
+        self.assertEqual(text, '"B3"')
+
+    def test_empty_json_object_falls_back_to_raw_display(self):
+        # Ein Objekt ohne Felder haette sonst einen leeren Dialogtext ergeben --
+        # schlechter als der Rohtext "{}".
+        text = listener.readable_request("POST", "/alarm/geheim", "", b"{}")
+        self.assertEqual(text, "{}")
+
+    def test_nested_object_value_renders_compactly(self):
+        body = b'{"keyword":"B3","ort":{"strasse":"Musterstrasse 12","plz":"12345"}}'
+        text = listener.readable_request("POST", "/alarm/geheim", "", body)
+        self.assertIn('{"strasse":"Musterstrasse 12","plz":"12345"}', text)
+        # Eine Zeile, kein mehrzeiliges Pretty-Print, das die Ausrichtung sprengt.
+        self.assertEqual(len(text.splitlines()), 2)
+
+    def test_array_value_renders_compactly(self):
+        body = b'{"einheiten":["Florian 1","Florian 2"]}'
+        text = listener.readable_request("POST", "/alarm/geheim", "", body)
+        self.assertIn('["Florian 1","Florian 2"]', text)
+
+    def test_scalar_values_render_as_json_literals(self):
+        body = b'{"aktiv":true,"anzahl":3,"notiz":null}'
+        text = listener.readable_request("POST", "/alarm/geheim", "", body)
+        lines = text.splitlines()
+        self.assertRegex(lines[0], r"^aktiv\s+true$")
+        self.assertRegex(lines[1], r"^anzahl\s+3$")
+        self.assertRegex(lines[2], r"^notiz\s+null$")
+
+    def test_a_very_long_field_name_does_not_blow_up_the_padding(self):
+        long_name = "x" * 60
+        body = '{{"{}":"lang","id":"kurz"}}'.format(long_name).encode("utf-8")
+        text = listener.readable_request("POST", "/alarm/geheim", "", body)
+        lines = text.splitlines()
+        # Die Ausrichtung folgt dem gedeckelten Feldnamen, nicht dem 60 Zeichen
+        # langen: sonst schoebe ein einziges ungewoehnliches Feld jeden Wert aus
+        # dem sichtbaren Bereich des Dialogs.
+        self.assertLess(len(re.match(r"^id(\s+)", lines[1]).group(1)), 30)
+
+    def test_json_body_still_reaches_the_log_unformatted(self):
+        # Anforderung 4: alarms.log zeigt weiter die Rohanfrage, nicht das
+        # Feld-pro-Zeile-Layout.
+        body = b'{"keyword":"B3","unit":"unit1"}'
+        record = listener.raw_request_record(
+            "POST", "/alarm/geheim", "", body, datetime(2026, 9, 10, 14, 0, 0)
+        )
+        self.assertIn('{"keyword":"B3","unit":"unit1"}', record)
+        self.assertNotIn("keyword   B3", record)
+
+    def test_huge_json_object_is_still_capped_for_the_dialog(self):
+        body = ('{{"stichwort":"{}"}}'.format("x" * 50000)).encode("utf-8")
+        text = listener.readable_request("POST", "/alarm/geheim", "", body)
+        self.assertLess(len(text), listener.DIALOG_MAX_CHARS + 200)
+        self.assertIn("gekuerzt", text)
+
+
 import threading
 
 

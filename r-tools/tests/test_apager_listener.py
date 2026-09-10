@@ -429,5 +429,31 @@ class TestSourceCheck(unittest.TestCase):
         self.assertEqual(response.status, 404)
 
 
+class TestReadConfig(unittest.TestCase):
+    def _write(self, text):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = pathlib.Path(tmp.name) / "config"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_reads_quoted_values(self):
+        path = self._write('APAGER_PORT="8787"\nAPAGER_TOKEN="geheim"\n')
+        config = listener.read_config(path)
+        self.assertEqual(config["APAGER_PORT"], "8787")
+        self.assertEqual(config["APAGER_TOKEN"], "geheim")
+
+    def test_ignores_comments_and_blank_lines(self):
+        path = self._write('# ein Kommentar\n\nAPAGER_TOKEN="geheim"\n')
+        self.assertEqual(listener.read_config(path), {"APAGER_TOKEN": "geheim"})
+
+    def test_reads_unquoted_values(self):
+        path = self._write("APAGER_PORT=8787\n")
+        self.assertEqual(listener.read_config(path)["APAGER_PORT"], "8787")
+
+    def test_missing_file_yields_empty_dict(self):
+        self.assertEqual(listener.read_config(pathlib.Path("/nicht/vorhanden")), {})
+
+
 if __name__ == "__main__":
     unittest.main()

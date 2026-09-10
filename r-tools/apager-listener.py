@@ -11,12 +11,16 @@ Siehe docs/2026-09-10-apager-design.md.
 
 import hmac
 import ipaddress
+import logging
+import pathlib
 import re
 import subprocess
+import sys
 import threading
+import time
 from collections import namedtuple
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # Tailscale vergibt aus dem CGNAT-Bereich; die IPv6-Adressen stammen aus dem
 # festen ULA-Praefix des Dienstes.
@@ -334,3 +338,122 @@ def make_handler(token, display, alarm_log, allow_source=is_tailnet_ip, on_event
                 notify("Anzeige fehlgeschlagen: {}".format(exc))
 
     return AlarmHandler
+
+
+CONFIG_PATH = pathlib.Path.home() / ".config" / "apager" / "config"
+STATE_DIR = pathlib.Path.home() / ".local" / "state" / "apager"
+ALARM_LOG = STATE_DIR / "alarms.log"
+BOUND_FILE = STATE_DIR / "bound"
+
+DEFAULT_PORT = 8787
+
+# Wie lange zwischen zwei Versuchen gewartet wird, wenn Tailscale nicht laeuft
+# oder der Port belegt ist. Kurz genug, dass ein Wiederanlauf nicht auffaellt.
+RETRY_SECONDS = 5
+
+# Wie oft die gebundene Adresse geprueft wird. Ein Wechsel ist selten; haeufiger
+# nachzusehen kostet nur Strom.
+ADDRESS_CHECK_SECONDS = 15
+
+_CONFIG_RE = re.compile(r'^\s*([A-Z_][A-Z0-9_]*)\s*=\s*"?([^"]*)"?\s*$')
+
+
+def read_config(path):
+    """Liest KEY="wert"-Zeilen. Fehlt die Datei, ist die Konfiguration leer."""
+    config = {}
+    try:
+        text = pathlib.Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return config
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = _CONFIG_RE.match(line)
+        if match:
+            config[match.group(1)] = match.group(2)
+    return config
+
+
+def serve(address, port, token, display, alarm_log, bound_file, on_event):
+    """Bedient Requests auf genau einer Adresse, bis sie verschwindet.
+
+    Kehrt zurueck, wenn die Adresse wegfaellt oder sich aendert; die aufrufende
+    Schleife sucht dann eine neue. Ein Ausweichen auf 0.0.0.0 findet nie statt.
+    """
+    handler = make_handler(token, display, alarm_log, on_event=on_event)
+    try:
+        httpd = ThreadingHTTPServer((address, port), handler)
+    except OSError as exc:
+        on_event("Bind auf {}:{} fehlgeschlagen: {}".format(address, port, exc))
+        return
+
+    on_event("gebunden an {}:{}".format(address, port))
+    try:
+        bound_file.parent.mkdir(parents=True, exist_ok=True)
+        bound_file.write_text("{}:{}\n".format(address, port), encoding="utf-8")
+    except OSError as exc:
+        on_event("bound-Datei nicht schreibbar: {}".format(exc))
+
+    worker = threading.Thread(target=httpd.serve_forever, daemon=True)
+    worker.start()
+    try:
+        while True:
+            time.sleep(ADDRESS_CHECK_SECONDS)
+            if tailnet_address() != address:
+                on_event("Tailscale-Adresse hat sich geaendert oder ist weg")
+                return
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        try:
+            bound_file.unlink()
+        except OSError:
+            pass
+
+
+def main():
+    logging.basicConfig(
+        stream=sys.stderr,
+        level=logging.INFO,
+        format="%(asctime)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    config = read_config(CONFIG_PATH)
+    token = config.get("APAGER_TOKEN", "")
+    if not token:
+        logging.error("kein APAGER_TOKEN in %s — es wird nichts angenommen", CONFIG_PATH)
+        return 1
+    try:
+        port = int(config.get("APAGER_PORT", DEFAULT_PORT))
+    except ValueError:
+        logging.error("APAGER_PORT ist keine Zahl")
+        return 1
+
+    display = AlarmDisplay(on_error=lambda exc: logging.error("Anzeige: %s", exc))
+
+    # Nur bei Zustandswechsel protokollieren. Alle fuenf Sekunden "kein
+    # Tailscale" zu schreiben, macht die Datei gross und die Meldung wertlos.
+    last_state = None
+    while True:
+        address = tailnet_address()
+        if address is None:
+            if last_state != "down":
+                logging.info("keine Tailscale-Adresse — warte")
+                last_state = "down"
+            time.sleep(RETRY_SECONDS)
+            continue
+        last_state = "up"
+        serve(
+            address=address,
+            port=port,
+            token=token,
+            display=display,
+            alarm_log=ALARM_LOG,
+            bound_file=BOUND_FILE,
+            on_event=logging.info,
+        )
+        time.sleep(RETRY_SECONDS)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

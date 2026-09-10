@@ -148,6 +148,25 @@ listener_alive() {
 
 # --- Aktionen ----------------------------------------------------------------
 
+# launchctl bootout kehrt zurueck, sobald launchd den Abbau *angestossen* hat —
+# nicht, wenn er fertig ist. Ein bootstrap, das direkt danach kommt, trifft
+# deshalb gelegentlich noch auf den alten Dienst und scheitert mit
+# "5: Input/output error". Das sieht aus wie Aberglaube, ist aber reproduzierbar:
+# genau dieses Wettrennen hat "apager install" gegen einen bereits geladenen
+# Agenten scheitern und den Listener unten liegen lassen. Deshalb erst
+# abwarten, bis "launchctl print" den Dienst nicht mehr findet, mit einer
+# Zeitschranke statt eines geschaetzten festen sleep — ein regulaerer Abbau ist
+# in Bruchteilen einer Sekunde durch, mehr als die paar Sekunden hier braucht
+# nur ein Dienst, der ohnehin haengt.
+wait_bootout() {
+  local deadline=$((SECONDS + 5))
+  while ((SECONDS < deadline)); do
+    launchctl print "$SERVICE" >/dev/null 2>&1 || return 0
+    sleep 0.2
+  done
+  return 1
+}
+
 do_install() {
   [[ -f "$LISTENER" ]] || die "apager-listener.py fehlt neben $0"
 
@@ -208,11 +227,26 @@ CONF
 </plist>
 PLIST_EOF
 
-  # bootout vor bootstrap: eine bereits geladene Fassung wuerde die neue
-  # sonst mit "service already loaded" abweisen.
+  # bootout vor bootstrap: eine bereits geladene Fassung wuerde die neue sonst
+  # mit "service already loaded" abweisen. wait_bootout siehe oben — ohne sie
+  # trifft das bootstrap unten manchmal noch auf den alten Dienst.
   launchctl bootout "$SERVICE" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$PLIST"
-  printf 'LaunchAgent geladen: %s\n\n' "$LABEL"
+  if ! wait_bootout; then
+    die "alter Dienst geht nicht herunter, vermutlich laeuft er noch mit der alten Config weiter. Kein bootstrap versucht, um ihn nicht zu gefaehrden. Pruefen mit 'apager status', dann 'apager install' erneut versuchen."
+  fi
+
+  local bootstrap_err=""
+  bootstrap_err="$(launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>&1)" || true
+  if launchctl print "$SERVICE" >/dev/null 2>&1; then
+    printf 'LaunchAgent geladen: %s\n\n' "$LABEL"
+  else
+    # Genau der Fall, vor dem dieses Skript warnen soll: der alte Dienst ist
+    # weg, der neue kam nicht hoch. Kein Listener laeuft — ein Alarm in diesem
+    # Fenster geht verloren. launchd's eigene Fehlermeldung ("Input/output
+    # error") nennt keine Ursache, deshalb steht sie hier nur als Zusatz, nicht
+    # als letztes Wort.
+    die "LaunchAgent NICHT geladen — kein Listener laeuft, Alarme kommen gerade nicht an. launchd: ${bootstrap_err:-Dienst nach bootstrap nicht auffindbar}. Sofort erneut versuchen: apager install"
+  fi
 
   do_url
 }

@@ -15,7 +15,7 @@
 - **Python ist immer `/usr/bin/python3`**, nie `python3` aus dem PATH. Die mise-verwalteten Versionen liegen unter `~/.local/share/mise/` und verschwinden beim naechsten Versionswechsel — ein LaunchAgent stuende dann still.
 - **Nur Standardbibliothek.** Keine pip-Installation, kein venv. Zielversion ist 3.9.6, also kein `match`, kein `X | Y` in Annotationen zur Laufzeit, kein `tomllib`.
 - **Externe Kommandos absolut adressieren:** `/sbin/ifconfig`, `/usr/bin/osascript`, `/bin/launchctl`. launchd startet Agents mit einem minimalen PATH, der weder `/opt/homebrew/bin` noch `/usr/local/bin` kennt.
-- **Skripte sind ASCII.** Kommentare in Skripten transliterieren Umlaute (`Hoehe`, `grosszuegig`), wie in `sbar` und `backup`. Nur Dateien unter `docs/` und der im Dialog angezeigte Text duerfen Umlaute enthalten.
+- **Skripte transliterieren Umlaute** (`Hoehe`, `grosszuegig`), wie in `sbar` und `backup`. Gemeint sind Umlaute und Eszett, nicht jedes Zeichen jenseits von ASCII: Geviertstriche stehen in `sbar` durchgehend und bleiben erlaubt. Dateien unter `docs/` und der im Dialog angezeigte Text tragen volle Umlaute.
 - **Kommentare erklaeren das Warum, nicht das Was.** Vorbild ist der Kopf von `sbar`.
 - **`.dotfiles` ist ein oeffentliches Repository.** Token, Tailnet-Namen und IP-Adressen gehoeren nach `~/.config/apager/config`, niemals in eine versionierte Datei. Auch nicht als Beispiel.
 - **`apager-listener.py` bekommt Modus 644, nicht 755.** Der Dispatcher `r-tools` listet jede ausfuehrbare Datei im Verzeichnis als eigenes Werkzeug; der Listener ist keines.

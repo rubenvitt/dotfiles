@@ -39,7 +39,16 @@ apager - aPager-Alarme aus dem Tailnet auf dem Mac anzeigen
   apager test         Einen Testalarm ueber das Tailnet schicken
   apager logs         Die letzten Alarme anzeigen
   apager logs -f      Dem Protokoll folgen
+  apager logs --listener   Betriebsmeldungen des Listeners anzeigen
   apager -h | --help  Diese Hilfe
+
+Zwei Protokolle, und sie beantworten verschiedene Fragen:
+  alarms.log    was angekommen ist            ("apager logs")
+  listener.log  was abgewiesen wurde und      ("apager logs --listener")
+                warum der Listener nicht bindet
+
+Ein Alarm, der wegen eines veralteten Tokens mit 404 abprallt, steht nur im
+listener.log — "apager status" zaehlt solche Faelle deshalb mit.
 
 Der Mac ist Anzeige, nicht Alarmierung: kein Ton, keine Benachrichtigung, kein
 Wecken. Schlaeft der Rechner, verpasst er den Alarm — alarmiert wird ueber das
@@ -77,6 +86,57 @@ bound_address() { [[ -f "$BOUND" ]] && cat "$BOUND" || true; }
 # zurueck: jede Adresse hier ist die eigene Maschine, der Kernel antwortet
 # also sofort mit ACK, RST oder EHOSTUNREACH — der Timeout war ohnehin nur
 # ein Guertel, nicht die Hose.
+# Abgewiesene Anfragen stehen ausschliesslich im listener.log. Ohne diese
+# Auswertung meldet "status" bei einem veralteten Token vier gruene Zeilen —
+# Agent geladen, Listener gebunden, Tailscale verbunden, noch kein Alarm —
+# waehrend jeder echte Alarm mit 404 abprallt. Genau die Anzeige, die Gesundheit
+# behauptet, wo keine ist.
+#
+# Gezaehlt wird ab dem letzten "gebunden an": in einem Protokoll, das niemand
+# rotiert, laese die Zeile sonst fuer immer "47 seit August" und beantwortete
+# nicht mehr die Frage, um die es geht — prallt gerade jetzt etwas ab.
+#
+# Der Pfad bleibt draussen, dort steht das versuchte Token. awk statt einer
+# grep-Kette, weil es in einem Durchlauf zaehlt und unter "set -o pipefail"
+# auch ohne Treffer mit 0 endet.
+rejection_summary() {
+  [[ -s "$LISTENER_LOG" ]] || return 0
+  awk '
+    /gebunden an/          { n = 0; first = ""; last = ""; next }
+    /abgewiesen: /         {
+      n++
+      if (first == "") first = substr($0, 1, 16)
+      last = $0
+      sub(/.*abgewiesen: /, "", last)
+      sub(/ \([^(]*\)$/, "", last)
+    }
+    END { if (n > 0) printf "%d seit %s (letzte: %s)", n, first, last }
+  ' "$LISTENER_LOG"
+}
+
+# Die letzte Zeile des listener.log — ohne Heuristik, und gerade deshalb
+# aussagekraeftig: haengt der Listener an keiner Adresse, unterscheidet genau
+# diese Zeile "keine Tailscale-Adresse — warte" von einer Absturzschleife
+# (fehlendes Token, unbrauchbarer Port), die KeepAlive alle zehn Sekunden neu
+# startet. Beide Faelle sahen bisher identisch aus.
+listener_last_line() {
+  [[ -s "$LISTENER_LOG" ]] || return 0
+  tail -1 "$LISTENER_LOG"
+}
+
+# Die eigene Tailscale-Adresse, mit denselben zwei Bedingungen wie im Listener:
+# utun-Interface und der echte Bereich 100.64.0.0/10. Ein blosses "inet 100."
+# traefe 100.0.0.0/8 und damit weit mehr, als Tailscale je vergibt.
+tailscale_address() {
+  /sbin/ifconfig -a 2>/dev/null | awk '
+    /^[^[:space:]]/ { iface = $1; sub(/:$/, "", iface); next }
+    $1 == "inet" && iface ~ /^utun/ {
+      split($2, o, ".")
+      if (o[1] == 100 && o[2] >= 64 && o[2] <= 127) { print $2; exit }
+    }
+  ' || true
+}
+
 listener_alive() {
   local addr="$1"
   if command -v timeout >/dev/null 2>&1; then
@@ -92,20 +152,36 @@ do_install() {
   [[ -f "$LISTENER" ]] || die "apager-listener.py fehlt neben $0"
 
   mkdir -p "$CONFIG_DIR" "$STATE_DIR"
+  chmod 700 "$STATE_DIR"
   if [[ -f "$CONFIG" ]]; then
     printf 'Config bleibt: %s\n' "$CONFIG"
   else
     local token
     token="$(openssl rand -hex 16)"
-    umask 077
-    cat > "$CONFIG" <<CONF
+    # umask in einer Subshell: sonst erbte die plist weiter unten sie und
+    # bekaeme bei einer Neuinstallation eine andere Zugriffsmaske als bei der
+    # ersten. Das chmod deckt den kurzen Moment zwischen Anlegen und Setzen ab.
+    (
+      umask 077
+      cat > "$CONFIG" <<CONF
 # Von \`apager install\` erzeugt. Siehe docs/apager.conf.example.
 APAGER_PORT="8787"
 APAGER_TOKEN="$token"
 CONF
+    )
     chmod 600 "$CONFIG"
     printf 'Config angelegt: %s\n' "$CONFIG"
   fi
+
+  # launchd oeffnet die listener.log selbst und mit seiner eigenen umask (644).
+  # Die umask des Listeners kommt dafuer zu spaet — die Datei existiert dann
+  # schon. Sie enthaelt die abgewiesenen Pfade und damit versuchte Token,
+  # deshalb hier anlegen, bevor launchd sie zum ersten Mal oeffnet.
+  : >> "$LISTENER_LOG"
+  chmod 600 "$LISTENER_LOG"
+  # Einsatzadressen, mitunter Namen. Bestandsdateien einer aelteren Fassung
+  # tragen noch 644.
+  if [[ -f "$ALARM_LOG" ]]; then chmod 600 "$ALARM_LOG"; fi
 
   mkdir -p "$(dirname "$PLIST")"
   cat > "$PLIST" <<PLIST_EOF
@@ -181,6 +257,11 @@ do_status() {
   bound="$(bound_address)"
   if [[ -z "$bound" ]]; then
     printf 'Listener      an keine Adresse gebunden\n'
+    local why
+    why="$(listener_last_line)"
+    if [[ -n "$why" ]]; then
+      printf '              zuletzt im Protokoll: %s\n' "$why"
+    fi
   elif listener_alive "$bound"; then
     printf 'Listener      gebunden an %s\n' "$bound"
   else
@@ -190,7 +271,7 @@ do_status() {
   # Ueber ifconfig statt ueber das tailscale-CLI: der App-Store-Build blockiert
   # dessen Aufrufe gelegentlich minutenlang.
   local ts
-  ts="$(/sbin/ifconfig -a 2>/dev/null | awk '/inet 100\./ {print $2}' | head -1)"
+  ts="$(tailscale_address)"
   if [[ -n "$ts" ]]; then
     printf 'Tailscale     verbunden (%s)\n' "$ts"
   else
@@ -210,6 +291,16 @@ do_status() {
     fi
   else
     printf 'Letzter Alarm noch keiner\n'
+  fi
+
+  local rejected
+  rejected="$(rejection_summary)"
+  if [[ -n "$rejected" ]]; then
+    printf 'Abgewiesen    %s\n' "$rejected"
+  elif [[ -f "$LISTENER_LOG" ]]; then
+    printf 'Abgewiesen    keine\n'
+  else
+    printf 'Abgewiesen    kein Protokoll (%s)\n' "$LISTENER_LOG"
   fi
 }
 
@@ -237,12 +328,26 @@ Ausgeloest von: apager test"
   printf 'Angenommen. Der Dialog sollte jetzt offen sein.\n'
 }
 
+# Zwei Protokolle, zwei Fragen: alarms.log sagt, was ankam, listener.log sagt,
+# was abgewiesen wurde und warum nicht gebunden wird. Letzteres war bisher von
+# keinem Befehl erreichbar.
 do_logs() {
-  [[ -f "$ALARM_LOG" ]] || die "noch kein Protokoll: $ALARM_LOG"
-  if [[ "${1:-}" == "-f" ]]; then
-    tail -f "$ALARM_LOG"
+  local log="$ALARM_LOG" follow=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -f|--follow) follow=1 ;;
+      --listener)  log="$LISTENER_LOG" ;;
+      "")          ;;
+      *)           die "unbekannte Option fuer logs: $1 (siehe --help)" ;;
+    esac
+    shift
+  done
+
+  [[ -f "$log" ]] || die "noch kein Protokoll: $log"
+  if [[ -n "$follow" ]]; then
+    tail -f "$log"
   else
-    tail -40 "$ALARM_LOG"
+    tail -40 "$log"
   fi
 }
 
@@ -253,7 +358,7 @@ case "${1:-}" in
   status)         do_status ;;
   url)            do_url ;;
   test)           do_test ;;
-  logs)           shift; do_logs "${1:-}" ;;
+  logs)           shift; do_logs "$@" ;;
   "")             do_status ;;
   *)              die "unbekannter Befehl: $1 (siehe --help)" ;;
 esac

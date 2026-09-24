@@ -162,10 +162,10 @@ run = ['layout floating']
     ctrl-alt-space = 'layout floating tiling'              # Fenster schweben lassen
 
     # Modi
-    ctrl-alt-r = 'mode resize'
+    ctrl-alt-shift-r = 'mode resize'   # nicht ctrl-alt-r: in IntelliJ belegt
     ctrl-alt-s = 'mode service'
 
-# ── Resize-Modus (Ctrl+Alt+R, verlassen mit Esc/Enter) ──────────────────────
+# ── Resize-Modus (Ctrl+Alt+Shift+R, verlassen mit Esc/Enter) ──────────────────────
 [mode.resize.binding]
     left  = 'resize width +50'
     right = 'resize width -50'

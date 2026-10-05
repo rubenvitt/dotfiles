@@ -27,7 +27,6 @@ if status is-interactive
     # fzf.fish vor atuin, damit atuin Ctrl+R behält, Ctrl+V bleibt Einfügen
     fzf_configure_bindings --history= --variables=ctrl-alt-v
     set -g fzf_fd_opts --hidden --exclude=.git
-    set -g fzf_preview_dir_cmd eza --all --color=always --icons=always --group-directories-first
     atuin init fish | sed "s/-k up/up/g" | source
     zoxide init --cmd cd fish | source
 end

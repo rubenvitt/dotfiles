@@ -114,6 +114,11 @@ run = ['layout floating']
 if = 'test %{app-bundle-id} = com.parallels.desktop.console'
 run = ['layout floating']
 
+# Raycast: Kommandopalette und Detailfenster nie kacheln
+[[on-window-detected]]
+if = 'test %{app-bundle-id} = com.raycast.macos'
+run = ['layout floating']
+
 # ── Haupt-Modus ─────────────────────────────────────────────────────────────
 [mode.main.binding]
 

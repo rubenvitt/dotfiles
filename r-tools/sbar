@@ -1,0 +1,174 @@
+#!/usr/bin/env bash
+# sbar - Sketchybar neu laden und pruefen, dass die Config wirklich durchlief
+set -euo pipefail
+
+# Warum es dieses Skript gibt: `sketchybar --reload` sagt nie, ob es geklappt
+# hat. Bleibt der Lua-Config-Prozess irgendwo haengen, laeuft sketchybar
+# munter weiter — nur eben mit den Werkseinstellungen (Hoehe 25, keine Items)
+# und ohne eine einzige Fehlermeldung im Log. Wer dann wartet, wartet ewig.
+#
+# "Gesund" heisst hier zweierlei, beides muss stimmen:
+#   * `--query bar` liefert Items (die Config wurde committet), und
+#   * der Kindprozess `lua .../sketchybarrc` lebt (Callbacks funktionieren).
+# Ohne den zweiten Teil steht die Bar zwar, aber kein Klick und kein Popup tut
+# noch etwas.
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sketchybar"
+PLIST="$HOME/Library/LaunchAgents/homebrew.mxcl.sketchybar.plist"
+SERVICE="gui/$(id -u)/homebrew.mxcl.sketchybar"
+
+# Auf einer ruhigen Maschine ist die Config in unter einer Sekunde drin. Unter
+# Last dauert sie ein Vielfaches — gemessen 40 s bei load 28 — deshalb so
+# grosszuegig: ein zu frueher zweiter Anlauf macht es nur schlimmer.
+WAIT_SECONDS=45
+ATTEMPTS=2
+
+usage() {
+  cat <<'EOF'
+sbar - Sketchybar neu laden und pruefen, dass die Config wirklich durchlief
+
+  sbar                Config neu laden, verifizieren, im Fehlerfall nachlegen
+  sbar reload         dasselbe, ausgeschrieben
+  sbar restart        echter Prozess-Neustart (stop, Pause, start) + Pruefung
+  sbar status         Was laeuft gerade: Items, Config-Prozess, Event-Provider
+  sbar -h | --help    diese Hilfe
+
+Ein Prozess-Neustart ist nur noetig, wenn eine per `launchctl setenv` gesetzte
+Variable ankommen soll — `--reload` liest die launchd-Umgebung nicht neu.
+EOF
+}
+
+die() { printf 'sbar: %s\n' "$1" >&2; exit 1; }
+
+# --- Zustand abfragen --------------------------------------------------------
+
+# Steckt sketchybar selbst fest, blockiert --query ohne Timeout unbegrenzt.
+query_bar() { timeout 5 sketchybar --query bar 2>/dev/null || true; }
+
+item_count() {
+  local out
+  out="$(query_bar)"
+  [[ -z "$out" ]] && { echo -1; return; }
+  printf '%s' "$out" | jq -r '.items | length' 2>/dev/null || echo -1
+}
+
+# Der Config-Prozess ist ein Kind von sketchybar und heisst nach dem Shebang
+# schlicht "lua"; das Argument macht ihn eindeutig.
+config_pids() { pgrep -f "lua .*sketchybarrc" 2>/dev/null || true; }
+
+healthy() {
+  local n
+  n="$(item_count)"
+  [[ "$n" -gt 0 ]] && [[ -n "$(config_pids)" ]]
+}
+
+wait_healthy() {
+  local deadline=$((SECONDS + WAIT_SECONDS))
+  while ((SECONDS < deadline)); do
+    healthy && return 0
+    sleep 0.2
+  done
+  return 1
+}
+
+# Ein festhaengender Config-Prozess ueberlebt --reload nicht zuverlaessig und
+# wuerde den naechsten Versuch mit "Item already exists" zumuellen.
+kill_stale_config() {
+  local pid
+  for pid in $(config_pids); do
+    kill "$pid" 2>/dev/null || true
+  done
+  sleep 0.3
+}
+
+# --- Aktionen ----------------------------------------------------------------
+
+do_reload() {
+  local attempt
+  for ((attempt = 1; attempt <= ATTEMPTS; attempt++)); do
+    # Nur aufraeumen, wenn die Bar ohnehin schon kaputt ist. Steht sie, macht
+    # --reload den Wechsel selbst — und ein Kill waere nur ein Fenster mehr,
+    # in dem gar nichts da ist.
+    healthy || kill_stale_config
+    sketchybar --reload
+    if wait_healthy; then
+      printf 'sbar: geladen (%s Items, Versuch %d)\n' "$(item_count)" "$attempt"
+      return 0
+    fi
+    printf 'sbar: Versuch %d haengt (>%ds), neuer Anlauf ...\n' "$attempt" "$WAIT_SECONDS" >&2
+  done
+
+  printf 'sbar: nach %d Versuchen keine Config in der Bar.\n' "$ATTEMPTS" >&2
+  do_status >&2
+  return 1
+}
+
+do_restart() {
+  pgrep -x sketchybar >/dev/null || die "sketchybar laeuft nicht — brew services start sketchybar"
+  [[ -f "$PLIST" ]] || die "kein launchd-Plist unter $PLIST"
+
+  launchctl bootout "$SERVICE" 2>/dev/null || true
+  # Die Pause ist der Punkt: startet der neue Prozess, waehrend der alte noch
+  # abgeraeumt wird, kommt die Bar deutlich haeufiger gar nicht hoch.
+  sleep 3
+  launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || true
+
+  if wait_healthy; then
+    printf 'sbar: neu gestartet (%s Items)\n' "$(item_count)"
+    return 0
+  fi
+  printf 'sbar: Prozess laeuft, aber die Config kam nicht durch — versuche: sbar reload.\n' >&2
+  do_status >&2
+  return 1
+}
+
+do_status() {
+  local n pids
+  n="$(item_count)"
+  pids="$(config_pids | tr '\n' ' ')"
+
+  printf 'sketchybar   '
+  if pgrep -x sketchybar >/dev/null; then
+    printf 'laeuft (PID %s)\n' "$(pgrep -x sketchybar | head -1)"
+  else
+    printf 'laeuft nicht\n'
+  fi
+
+  printf 'Items        '
+  case "$n" in
+    -1) printf 'keine Antwort (--query blockiert)\n' ;;
+     0) printf '0 — Werkseinstellungen, Config ist nicht durchgelaufen\n' ;;
+     *) printf '%s\n' "$n" ;;
+  esac
+
+  printf 'Config       %s\n' "${pids:-kein lua-Prozess — Config haengt oder ist gestorben}"
+
+  printf 'Provider     '
+  local providers
+  providers="$(pgrep -lf 'event_providers/.*/bin/' 2>/dev/null | sed 's|.*/bin/||; s| .*||' | sort -u | tr '\n' ' ')"
+  printf '%s\n' "${providers:-keine}"
+
+  printf 'Config-Dir   %s\n' "$CONFIG_DIR"
+
+  # Steht hier, weil es die haeufigste Erklaerung fuer einen zaehen Reload ist:
+  # dieselbe Config braucht bei load 6 rund 0,3 s und bei load 28 ueber 40 s.
+  local load
+  load="$(sysctl -n vm.loadavg | awk '{print $2}')"
+  printf 'Systemlast   %s' "$load"
+  awk -v l="$load" 'BEGIN { if (l+0 > 12) printf "  (hoch — ein zaeher Reload liegt eher daran als an der Config)" }'
+  printf '\n'
+}
+
+# --- Einstieg ----------------------------------------------------------------
+
+command -v sketchybar >/dev/null || die "sketchybar nicht im PATH"
+command -v jq >/dev/null || die "jq nicht im PATH (brew install jq)"
+command -v timeout >/dev/null || die "timeout nicht im PATH (brew install coreutils)"
+
+case "${1:-reload}" in
+  reload)          do_reload ;;
+  restart)         do_restart ;;
+  status)          do_status ;;
+  -h|--help|help)  usage ;;
+  *)               usage >&2; exit 1 ;;
+esac

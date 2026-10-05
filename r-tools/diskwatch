@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# diskwatch - Löscht cargo-Build-Artefakte, sobald die Platte zu voll wird
+set -euo pipefail
+
+# Warum es dieses Skript gibt: Parallel laufende Agent-Sessions bauen Rust mit
+# eigenem CARGO_TARGET_DIR und füllen die Platte binnen Stunden (gemessen am
+# 2026-09-29: rund 80 GB pro Stunde). Fast der ganze Platz steckt in
+# regenerierbaren Targets, meist in den Session-Scratchpads unter
+# /private/tmp/claude-501 — außerhalb von ~, deshalb findet `du ~` sie nicht.
+#
+# Ein Watcher innerhalb einer Claude-Session hält nicht: er stirbt mit der
+# Session oder am Zeitlimit für Hintergrundaufgaben. Deshalb läuft die Prüfung
+# unter launchd, einmal pro Minute, und räumt nur unter der Schwelle auf.
+#
+# Gelöscht werden ausschließlich Build-Artefakte, auch wenn gerade ein Build
+# hineinschreibt — der Build scheitert dann oder baut neu, verliert aber keine
+# Arbeit. Quellcode, Worktrees und Docker bleiben unangetastet.
+
+LABEL="dev.rubeen.diskwatch"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+SERVICE="gui/$(id -u)/$LABEL"
+LOG="$HOME/Library/Logs/diskwatch.log"
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+THRESHOLD_GB="${DISKWATCH_THRESHOLD_GB:-50}"
+SCRATCH_ROOT="/private/tmp/claude-501"
+# Nur in Worktrees löschen — ein Target im Hauptrepo gehört einer laufenden IDE.
+WORKTREE_ROOTS=("$HOME/dev" "$HOME/.codex/worktrees" "$HOME/orca/workspaces")
+
+usage() {
+  cat <<EOF
+diskwatch - Löscht cargo-Build-Artefakte, sobald die Platte zu voll wird
+
+  diskwatch check       Unter ${THRESHOLD_GB} GB frei aufräumen, sonst nichts tun (ruft launchd auf)
+  diskwatch now         Sofort aufräumen, unabhängig vom freien Platz
+  diskwatch list        Zeigen, was gelöscht würde, mit Größe
+  diskwatch install     LaunchAgent einrichten (prüft jede Minute)
+  diskwatch uninstall   LaunchAgent entfernen
+  diskwatch status      LaunchAgent, freien Platz, Swap und letzte Logzeilen zeigen
+
+Gelöscht werden:
+  - cargo-Targets in Session-Scratchpads unter $SCRATCH_ROOT
+  - ~/.cache/cargo-target/debug und ~/.cache/cargo-target-*
+  - target/ in Worktrees (.claude/worktrees, .worktrees, ~/.codex/worktrees, ~/orca/workspaces)
+
+Umgebung:
+  DISKWATCH_THRESHOLD_GB   Schwelle in GB (Standard 50)
+
+Log: $LOG
+EOF
+}
+
+die() { printf 'diskwatch: %s\n' "$*" >&2; exit 1; }
+
+free_gb() { df -g /System/Volumes/Data | awk 'NR==2 {print $4}'; }
+
+log() { printf '%s %s\n' "$(date '+%F %T')" "$*" | tee -a "$LOG"; }
+
+# Alle löschbaren Build-Verzeichnisse, eines pro Zeile.
+candidates() {
+  if [[ -d "$SCRATCH_ROOT" ]]; then
+    # cargo legt CACHEDIR.TAG in jedes Target, egal wie der Agent den Ordner
+    # nennt (target, cargo-target-a, lfh21-cargo-target, …). Wird ein Target
+    # aber mitten im Build gelöscht, legt cargo es ohne CACHEDIR.TAG neu an —
+    # dann bleibt nur <target>/<profil>/.fingerprint als Erkennungszeichen.
+    # Liegt das Target direkt im Scratchpad, wäre dessen Elternordner das
+    # Scratchpad selbst; das fällt beim grep heraus.
+    {
+      /usr/bin/find "$SCRATCH_ROOT" -mindepth 5 -maxdepth 6 -name CACHEDIR.TAG \
+        -path '*/scratchpad/*' -exec dirname {} \; 2>/dev/null
+      /usr/bin/find "$SCRATCH_ROOT" -mindepth 6 -maxdepth 7 -type d -name .fingerprint \
+        -path '*/scratchpad/*' -prune 2>/dev/null \
+        | while read -r fp; do dirname "$(dirname "$fp")"; done
+    } | grep -v '/scratchpad$' | sort -u || true
+  fi
+
+  # Nur debug/: release/, wasm32-*/ und doc/ sind klein und teuer neu zu bauen.
+  if [[ -d "$HOME/.cache/cargo-target/debug" ]]; then
+    echo "$HOME/.cache/cargo-target/debug"
+  fi
+  /usr/bin/find "$HOME/.cache" -mindepth 1 -maxdepth 1 -type d -name 'cargo-target-*' 2>/dev/null || true
+
+  local roots=()
+  local r
+  for r in "${WORKTREE_ROOTS[@]}"; do if [[ -d "$r" ]]; then roots+=("$r"); fi; done
+  if [[ ${#roots[@]} -gt 0 ]]; then
+    /usr/bin/find "${roots[@]}" -type d -name target \
+      \( -path '*/.claude/worktrees/*' -o -path '*/.worktrees/*' \
+         -o -path "$HOME/.codex/worktrees/*" -o -path "$HOME/orca/workspaces/*" \) \
+      -prune 2>/dev/null || true
+  fi
+}
+
+cleanup() {
+  local before p size
+  before="$(free_gb)"
+  log "frei: ${before} GB — räume auf"
+  while read -r p; do
+    [[ -n "$p" && -d "$p" ]] || continue
+    size="$(du -sh "$p" 2>/dev/null | cut -f1)"
+    # Schreibt ein Build gerade hinein, bleiben ein paar Dateien übrig.
+    if rm -rf -- "$p" 2>/dev/null; then
+      log "  gelöscht: $size  $p"
+    else
+      log "  teilweise (Build läuft): $size  $p"
+    fi
+  done < <(candidates)
+  local after
+  after="$(free_gb)"
+  log "danach frei: ${after} GB"
+  /usr/bin/osascript -e "display notification \"${before} → ${after} GB frei\" with title \"diskwatch hat aufgeräumt\"" 2>/dev/null || true
+}
+
+do_check() {
+  local f
+  f="$(free_gb)"
+  if [[ "$f" -lt "$THRESHOLD_GB" ]]; then cleanup; fi
+}
+
+do_list() {
+  local p
+  while read -r p; do
+    [[ -n "$p" && -d "$p" ]] || continue
+    du -sh "$p" 2>/dev/null
+  done < <(candidates) | sort -h
+}
+
+do_install() {
+  mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
+  cat > "$PLIST" <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>$LABEL</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>$SELF</string>
+		<string>check</string>
+	</array>
+	<key>StartInterval</key>
+	<integer>60</integer>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>StandardOutPath</key>
+	<string>/dev/null</string>
+	<key>StandardErrorPath</key>
+	<string>$LOG</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+</dict>
+</plist>
+PLIST_EOF
+  launchctl bootout "$SERVICE" 2>/dev/null || true
+  # bootout kehrt zurück, bevor der Dienst ganz weg ist; ein sofortiges
+  # bootstrap scheitert dann mit "Input/output error".
+  for _ in $(seq 1 25); do
+    launchctl print "$SERVICE" >/dev/null 2>&1 || break
+    sleep 0.2
+  done
+  launchctl bootstrap "gui/$(id -u)" "$PLIST" || die "LaunchAgent nicht geladen"
+  printf 'LaunchAgent geladen: %s (Schwelle %s GB, jede Minute)\n' "$LABEL" "$THRESHOLD_GB"
+}
+
+do_uninstall() {
+  launchctl bootout "$SERVICE" 2>/dev/null || true
+  rm -f "$PLIST"
+  printf 'LaunchAgent entfernt: %s\n' "$LABEL"
+}
+
+do_status() {
+  if launchctl print "$SERVICE" >/dev/null 2>&1; then
+    printf 'LaunchAgent: geladen (%s)\n' "$LABEL"
+  else
+    printf 'LaunchAgent: NICHT geladen — diskwatch install\n'
+  fi
+  printf 'Frei:        %s GB (Schwelle %s GB)\n' "$(free_gb)" "$THRESHOLD_GB"
+  printf 'Swap:        %s\n' "$(sysctl -n vm.swapusage)"
+  if [[ -f "$LOG" ]]; then
+    printf '\nLetzte Einträge (%s):\n' "$LOG"
+    tail -n 10 "$LOG"
+  fi
+}
+
+case "${1:-}" in
+  check)       do_check ;;
+  now)         cleanup ;;
+  list)        do_list ;;
+  install)     do_install ;;
+  uninstall)   do_uninstall ;;
+  status)      do_status ;;
+  -h|--help|"") usage ;;
+  *)           usage >&2; exit 1 ;;
+esac

@@ -2,7 +2,37 @@
 
 **Datum:** 2026-07-14
 **Status:** Umgesetzt. Switcher-**Mechanik** (Config-Dir-Auflösung, `ccp use`-Switch, Symlinks, Lock) verifiziert. **Offene Kern-Verifikation:** ob der Keychain-OAuth-Token pro Config-Dir schreib-isoliert ist (Punkt 1) — entscheidet, ob `work`-Login den `personal`-Login überlebt und ob beide gleichzeitig gehen. `innoq` **funktioniert end-to-end** — LiteLLM-Gateway des Arbeitgebers (Base-URL, Token und Modell-Mapping stehen in der nicht im Git liegenden `~/.claude/settings-innoq.json`), per `claude -p` gegen `~/.claude-innoq` verifiziert. Verfügbare Modelle via `GET <base>/v1/models`; Wechsel über `settings-innoq.json` + `ccp setup innoq`.
-**Ort des Tools:** `~/.dotfiles/r-tools/ccp` + Fish-Functions in `~/.dotfiles/fish/functions/` (`claude`, `_ccp_launch`, `claude-personal`, `claude-work`, `claude-innoq`)
+**Ort des Tools:** `~/.dotfiles/r-tools/ccp` + Fish-Functions in `~/.dotfiles/fish/functions/` (`claude`, `_ccp_launch`, `claude-personal`, `claude-work`, `claude-innoq`, `claude-dev`)
+
+## Nachtrag 2026-09-15: Profil `dev` — teilt alles außer dem Login
+
+`claude-dev` (`~/.claude-dev`) ist bewusst **nicht** abgegrenzt wie `work`: gleiche Memory,
+Sessions/Transcripts (`--resume`), History, Plans, Tasks, Settings wie `personal` — nur ein
+anderer Account.
+
+- **Warum trotzdem ein eigenes Dir:** Ein zweiter OAuth-Login braucht eine zweite
+  `.claude.json` (sie trägt `oauthAccount`), und zwei Prozesse in einer `.claude.json`
+  zerschießen sie. Damit laufen `claude` und `claude-dev` auch parallel. Die
+  Alternative — gleiches Dir, Auth per `CLAUDE_CODE_OAUTH_TOKEN` aus `claude setup-token` —
+  wurde verworfen: nur Inferenz-Scope, `/status` zeigt den falschen Account, Lock feuert
+  bei jedem parallelen Start.
+- **Verlinkt:** jeder Nicht-Dotfile-Eintrag aus `~/.claude`, außer `DEV_PRIVATE_ITEMS`:
+  `daemon`, `daemon.log`, `jobs`, `scheduled-tasks` (laufen mit dem Login ihres Dirs;
+  geteilt würden zwei Daemons dieselben Jobs abarbeiten), `policy-limits.json`,
+  `remote-settings.json` (Org-State), `mcp-needs-auth-cache.json` (MCP-OAuth),
+  `backups`, `cache`, `telemetry`, `settings-innoq.json` sowie Backup-Kopien (`*.bak*`).
+  Bewusst Denylist statt Allowlist: „alles außer Login" soll auch Einträge erfassen, die
+  Claude Code künftig neu anlegt. `sessions/`, `history.jsonl`, `shell-snapshots/` usw.
+  schreiben parallele Sessions schon innerhalb von personal gemeinsam — das Teilen über
+  zwei Dirs bringt dort kein neues Risiko; allein `.claude.json` verträgt keine zwei
+  Schreiber und bleibt getrennt.
+- **`.claude.json`:** eigene Datei; `mcpServers`, `projects` (personal gewinnt je Projekt),
+  `githubRepoPaths` und UI-Vorlieben werden **einbahnig** aus personal übernommen.
+  User-MCPs deshalb in `personal` anlegen — in dev hinzugefügte werden beim nächsten
+  Start überschrieben.
+- **`ccp sync dev`** läuft bei jedem `claude-dev`-Start (aus `_ccp_launch`): neue Einträge
+  in `~/.claude` werden nachverlinkt, der `.claude.json`-Abgleich schreibt atomar und
+  überspringt bei unlesbarer Quelle oder Ziel, statt den Start zu blockieren.
 
 **Validiert (mit Fake-`claude`, ohne echtes `~/.claude` anzufassen):** Config-Dir-Auflösung pro Profil, globaler `ccp use`-Switch, Lock anlegen/entfernen, stale Lock überschreiben, nicht-interaktiver Guard blockiert nicht.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ccp - Claude Code Profil-Switcher (personal/work/innoq)
+# ccp - Claude Code Profil-Switcher (personal/work/innoq/dev)
 set -euo pipefail
 
 # --- Konfiguration: Profil -> Config-Dir ist die einzige Quelle der Zuordnung ---
@@ -7,7 +7,16 @@ STATE_FILE="$HOME/.claude-active-profile"
 DEFAULT_PROFILE="personal"
 PERSONAL_DIR="$HOME/.claude"
 INNOQ_SRC_SETTINGS="$HOME/.claude/settings-innoq.json"
+PROFILES=(personal work innoq dev)
 SHARED_ITEMS=(skills plugins agents commands hooks CLAUDE.md)
+# dev teilt ALLES aus ~/.claude (Dotfiles wie .claude.json/.ccp.lock ausgenommen) —
+# bis auf diese Einträge, die an Login bzw. Account des Dirs hängen: daemon/jobs/
+# scheduled-tasks laufen mit dem Login ihres Dirs (geteilt würden beide Daemons dieselben
+# Jobs abarbeiten), policy-limits/remote-settings sind Org-State, mcp-needs-auth-cache ist
+# MCP-OAuth-State, backups/cache/telemetry gehören zur eigenen .claude.json.
+DEV_PRIVATE_ITEMS=(daemon daemon.log jobs scheduled-tasks backups cache telemetry
+  policy-limits.json remote-settings.json mcp-needs-auth-cache.json settings-innoq.json)
+QUIET=0
 
 usage() {
   cat <<'EOF'
@@ -17,11 +26,13 @@ ccp - Claude Code Profil-Switcher
   ccp list                Profile und ihre Config-Dirs auflisten
   ccp use <profil>        Globales Default-Profil setzen (nacktes `claude` folgt dem)
   ccp setup <profil>      Config-Dir anlegen + geteilte Teile verlinken
+  ccp sync dev            dev an ~/.claude angleichen (läuft bei jedem Start)  [intern]
   ccp dir [profil]        Config-Dir ausgeben (ohne Arg: aktives Profil)   [intern]
   ccp active              Namen des aktiven Profils ausgeben               [intern]
 
-Profile: personal (~/.claude), work (~/.claude-work), innoq (~/.claude-innoq)
-Explizite Starter (Fish): claude-personal / claude-work / claude-innoq
+Profile: personal (~/.claude), work (~/.claude-work), innoq (~/.claude-innoq),
+         dev (~/.claude-dev — teilt alles mit personal außer dem Login)
+Explizite Starter (Fish): claude-personal / claude-work / claude-innoq / claude-dev
 EOF
 }
 
@@ -31,6 +42,7 @@ profile_dir() {
     personal) printf '%s\n' "$HOME/.claude" ;;
     work)     printf '%s\n' "$HOME/.claude-work" ;;
     innoq)    printf '%s\n' "$HOME/.claude-innoq" ;;
+    dev)      printf '%s\n' "$HOME/.claude-dev" ;;
     *)        return 1 ;;
   esac
 }
@@ -67,10 +79,10 @@ login_state() {
 
 require_profile_arg() {
   if [[ -z "${1:-}" ]]; then
-    echo "ccp: Profil fehlt (personal|work|innoq)" >&2; return 1
+    echo "ccp: Profil fehlt (personal|work|innoq|dev)" >&2; return 1
   fi
   if ! valid_profile "$1"; then
-    echo "ccp: unbekanntes Profil: $1 (personal|work|innoq)" >&2; return 1
+    echo "ccp: unbekanntes Profil: $1 (personal|work|innoq|dev)" >&2; return 1
   fi
 }
 
@@ -83,7 +95,7 @@ link_item() {
   fi
   if [[ -L "$dst" ]]; then
     if [[ "$(readlink "$dst")" == "$src" ]]; then
-      echo "  ✓ $item"
+      [[ "$QUIET" == 1 ]] || echo "  ✓ $item"
     else
       echo "  ! $item: fremder Symlink ($(readlink "$dst")) — lasse unberührt" >&2
     fi
@@ -92,6 +104,71 @@ link_item() {
   else
     ln -s "$src" "$dst" && echo "  + $item → ~/.claude/$item"
   fi
+}
+
+is_dev_private() {
+  local item="$1" p
+  # Backup-Kopien von settings.json & Co. sind Altlasten, kein geteilter Zustand
+  case "$item" in *.bak|*.bak-*|*-bak-*|*.backup) return 0 ;; esac
+  for p in "${DEV_PRIVATE_ITEMS[@]}"; do
+    [[ "$item" == "$p" ]] && return 0
+  done
+  return 1
+}
+
+# dev: jeden Eintrag aus ~/.claude verlinken, der nicht an Login/Account hängt.
+# Läuft bei jedem Start, damit auch später in ~/.claude entstandene Einträge geteilt werden.
+link_dev_items() {
+  local dir="$1" src item
+  for src in "$PERSONAL_DIR"/*; do
+    [[ -e "$src" ]] || continue
+    item="${src##*/}"
+    is_dev_private "$item" && continue
+    link_item "$dir" "$item"
+  done
+}
+
+# dev: Inhalte aus ~/.claude/.claude.json übernehmen (MCP-Server, Projekt-Trust/-Tools,
+# UI-Vorlieben). Die Datei selbst bleibt pro Dir, weil sie oauthAccount trägt und zwei
+# Prozesse in einer .claude.json sie zerschießen. Einbahnstraße personal → dev:
+# User-MCPs deshalb in personal hinzufügen, nicht in dev.
+sync_dev_state() {
+  python3 - "$PERSONAL_DIR/.claude.json" "$1/.claude.json" <<'PY'
+import json, os, sys, tempfile
+src, dst = sys.argv[1:3]
+SHARED_KEYS = ("mcpServers", "projects", "githubRepoPaths", "theme", "editorMode",
+               "verbose", "autoConnectIde", "respectGitignore", "teammateMode")
+try:
+    with open(src) as f: personal = json.load(f)
+except (OSError, ValueError) as e:
+    # personal schreibt evtl. gerade — Start nicht blockieren, beim nächsten Start erneut
+    print(f"ccp: ~/.claude/.claude.json nicht lesbar ({e}) — dev-State nicht abgeglichen", file=sys.stderr)
+    sys.exit(0)
+try:
+    with open(dst) as f: dev = json.load(f)
+except FileNotFoundError:
+    dev = {}
+except (OSError, ValueError) as e:
+    # nie über eine kaputte dev-Datei schreiben — sie trägt den oauthAccount
+    print(f"ccp: {dst} nicht lesbar ({e}) — dev-State nicht abgeglichen", file=sys.stderr)
+    sys.exit(0)
+merged = dict(dev)
+for key in SHARED_KEYS:
+    if key not in personal:
+        continue
+    if key == "projects":                  # personal gewinnt je Projekt, dev-only bleibt
+        merged[key] = {**dev.get(key, {}), **personal[key]}
+    else:
+        merged[key] = personal[key]
+if merged == dev:
+    sys.exit(0)
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(dst), prefix=".claude.json.ccp-")
+with os.fdopen(fd, "w") as f:
+    json.dump(merged, f, indent=2)
+    f.write("\n")
+os.chmod(tmp, 0o600)
+os.replace(tmp, dst)
+PY
 }
 
 # INNOQ-settings.json erzeugen: geteilte Personal-Settings + Gateway-Env aus settings-innoq.json.
@@ -135,7 +212,7 @@ cmd_active() { active_profile; }
 
 cmd_list() {
   local p
-  for p in personal work innoq; do
+  for p in "${PROFILES[@]}"; do
     printf '%-10s %s\n' "$p" "$(tildify "$(profile_dir "$p")")"
   done
 }
@@ -146,7 +223,7 @@ cmd_status() {
   echo "Aktives Profil (nacktes 'claude'): $act"
   echo
   printf '%-10s %-20s %-16s %s\n' PROFIL DIR STATUS AUTH
-  for p in personal work innoq; do
+  for p in "${PROFILES[@]}"; do
     dir="$(profile_dir "$p")"
     if [[ "$p" == innoq ]]; then
       auth="Gateway"
@@ -181,9 +258,13 @@ cmd_setup() {
   dir="$(profile_dir "$p")"
   mkdir -p "$dir"
   echo "Richte '$p' ein in $(tildify "$dir"):"
-  for item in "${SHARED_ITEMS[@]}"; do
-    link_item "$dir" "$item"
-  done
+  if [[ "$p" == dev ]]; then
+    link_dev_items "$dir"
+  else
+    for item in "${SHARED_ITEMS[@]}"; do
+      link_item "$dir" "$item"
+    done
+  fi
   case "$p" in
     work)
       link_item "$dir" settings.json
@@ -196,7 +277,27 @@ cmd_setup() {
       echo
       echo "Fertig — 'claude-innoq' startet direkt über das Gateway (kein Login nötig)."
       ;;
+    dev)
+      sync_dev_state "$dir"
+      echo "  + .claude.json: MCP-Server, Projekte und UI-Vorlieben aus ~/.claude übernommen"
+      echo
+      echo "Nächster Schritt: 'claude-dev' starten und mit dem DEV-Account einloggen (/login)."
+      ;;
   esac
+}
+
+# Nur dev spiegelt laufend; die übrigen Profile richtet `ccp setup` einmalig ein.
+cmd_sync() {
+  require_profile_arg "${1:-}"
+  [[ "$1" == dev ]] || return 0
+  local dir
+  dir="$(profile_dir dev)"
+  if [[ ! -d "$dir" ]]; then
+    echo "ccp: 'dev' ist noch nicht eingerichtet — zuerst 'ccp setup dev'." >&2; return 1
+  fi
+  QUIET=1
+  link_dev_items "$dir"
+  sync_dev_state "$dir"
 }
 
 main() {
@@ -207,6 +308,7 @@ main() {
     list)   cmd_list "$@" ;;
     use)    cmd_use "$@" ;;
     setup)  cmd_setup "$@" ;;
+    sync)   cmd_sync "$@" ;;
     dir)    cmd_dir "$@" ;;
     active) cmd_active "$@" ;;
     -h|--help|help) usage ;;

@@ -12,6 +12,8 @@ function _ccp_launch --description 'intern (ccp): Claude Code in einem bestimmte
                 set dir "$HOME/.claude-work"
             case innoq
                 set dir "$HOME/.claude-innoq"
+            case dev
+                set dir "$HOME/.claude-dev"
             case '*'
                 echo "ccp: unbekanntes Profil '$profile'" >&2
                 return 1
@@ -39,6 +41,12 @@ function _ccp_launch --description 'intern (ccp): Claude Code in einem bestimmte
                 end
             end
         end
+    end
+
+    # dev teilt alles außer dem Login mit personal: neue Einträge aus ~/.claude verlinken und
+    # MCP-/Projekt-State übernehmen. Schlägt das fehl, startet dev trotzdem.
+    if test "$profile" = dev; and command -q ccp
+        command ccp sync dev
     end
 
     echo $fish_pid >"$lock"

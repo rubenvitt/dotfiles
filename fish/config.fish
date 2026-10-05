@@ -3,16 +3,29 @@ fish_add_path $HOME/dev/common/tools
 set -gx PATH $PATH /opt/homebrew/anaconda3/bin
 set -gx PATH $PATH /Users/rubeen/dev/common/tools/bin
 set -gx PUPPETEER_SKIP_CHROMIUM_DOWNLOAD true
-set -gx PUPPETEER_EXECUTABLE_PATH `which chromium`
-eval (/opt/homebrew/bin/brew shellenv)
+
+# Homebrew: Ausgabe von `brew shellenv fish` fest eingetragen, spart den Prozessstart
+set -gx HOMEBREW_PREFIX /opt/homebrew
+set -gx HOMEBREW_CELLAR /opt/homebrew/Cellar
+set -gx HOMEBREW_REPOSITORY /opt/homebrew
+fish_add_path --global --move --path /opt/homebrew/bin /opt/homebrew/sbin
+if test -n "$MANPATH"
+    set -gx MANPATH (string replace --regex '^:*(.*?):*$' ':$1' -- "$MANPATH")
+end
+set -q INFOPATH; or set INFOPATH ''
+set -gx INFOPATH /opt/homebrew/share/info $INFOPATH
+
+if command -q chromium
+    set -gx PUPPETEER_EXECUTABLE_PATH (command -s chromium)
+end
+
 #source /opt/homebrew/opt/asdf/libexec/asdf.fish
 #set -gx PATH /Users/rubeen/.asdf/shims $PATH
-starship init fish | source
 if status is-interactive
+    starship init fish | source
     atuin init fish | sed "s/-k up/up/g" | source
-    # Commands to run in interactive sessions can go here
+    zoxide init --cmd cd fish | source
 end
-zoxide init --cmd cd fish | source
 # Added by LM Studio CLI (lms)
 set -gx PATH $PATH /Users/rubeen/.lmstudio/bin
 # End of LM Studio CLI section
@@ -27,14 +40,11 @@ set -gx PATH $HOME/.pnpm-global/bin $PATH
 # This won't be added again if you remove it.
 source ~/.orbstack/shell/init2.fish 2>/dev/null || :
 set -gx PATH ~/.local/bin $PATH
-# Added by Windsurf
-mise activate | source
+# mise aktiviert sich über /opt/homebrew/share/fish/vendor_conf.d selbst
 
 # Workaround for Claude Code shopt issue
 function shopt
     return 0
 end
 
-# Pi
-fish_add_path "/Users/rubeen/.local/share/mise/installs/node/24.16.0/bin"
 source /Users/rubeen/.config/op/plugins.sh

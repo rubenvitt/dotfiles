@@ -1,6 +1,5 @@
 font-family = "JetBrains Mono"
-font-size = 14
-adjust-cell-height = 10%
+font-size = 13
 theme = "dark:catppuccin-mocha.conf,light:catppuccin-latte.conf"
 selection-background = "#ffa500"
 selection-foreground = "#ffffff"

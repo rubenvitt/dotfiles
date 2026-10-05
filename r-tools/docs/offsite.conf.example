@@ -1,0 +1,30 @@
+# offsite.conf - Ziel des kopia-Blob-Spiegels (Hetzner Storage Box).
+#
+# Kopieren nach ~/.config/kopia/offsite.conf und ausfüllen:
+#   install -m 600 docs/offsite.conf.example ~/.config/kopia/offsite.conf
+#
+# Die echte Datei gehört bewusst NICHT in dieses Repository: es ist öffentlich,
+# und Host und Sub-Account haben darin nichts zu suchen. Modus 0600.
+
+# Storage Box. Der Sub-Account ist in sein Home eingesperrt und sieht es als
+# "/home" -- unabhängig davon, wo es im Hauptkonto tatsächlich liegt.
+OFFSITE_HOST="uXXXXXX.your-storagebox.de"
+OFFSITE_PORT="23"
+OFFSITE_USER="uXXXXXX-subN"
+
+# Eigenes Unterverzeichnis, nicht "/home" selbst: sonst stünden die Blobs neben
+# .ssh/authorized_keys, und --delete hätte deren Löschung zur Auswahl.
+OFFSITE_PATH="/home/kopia"
+
+# Eigener Schlüssel nur für dieses Ziel, ohne Passphrase -- ein unbeaufsichtigter
+# Lauf soll möglich bleiben. Er öffnet nur diesen chroot-ten Sub-Account, und was
+# dort liegt, ist vom Repository selbst verschlüsselt.
+#   ssh-keygen -t ed25519 -a 100 -N "" -f ~/.ssh/id_ed25519_storagebox_<host>
+# Host-Keys vorher pinnen und gegen die Liste in der Hetzner-Doku prüfen:
+#   ssh-keyscan -p 23 -t rsa,ecdsa,ed25519 <host> > ~/.ssh/known_hosts_storagebox
+#   ssh-keygen -lf ~/.ssh/known_hosts_storagebox
+OFFSITE_KEYFILE="$HOME/.ssh/id_ed25519_storagebox_<host>"
+OFFSITE_KNOWN_HOSTS="$HOME/.ssh/known_hosts_storagebox"
+
+# Eine einzelne SFTP-Session fährt die Leitung nicht aus.
+OFFSITE_PARALLEL="4"

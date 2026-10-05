@@ -8,7 +8,9 @@ SOURCE="${BACKUP_SOURCE:-/Users/rubeen}"
 PW_FILE="${BACKUP_PW_FILE:-$HOME/.config/kopia/.password}"
 OP_REF="${BACKUP_OP_REF:-op://Private/2wivl6237r6atg7q3z62h76t5u/password}"
 MOUNT_BASE="${BACKUP_MOUNT_BASE:-/tmp/kopia-mount}"
+OFFSITE_CONF="${BACKUP_OFFSITE_CONF:-$HOME/.config/kopia/offsite.conf}"
 LOG_DIR="$HOME/Library/Logs/kopia"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/kopia"
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 
@@ -100,6 +102,55 @@ for key, label in cats:
     note = "  voll" if mx > 0 and act >= mx else ""
     print(f"  {label:<9} {act:>3} / {mx:<3} {bar}{note}")
 '
+}
+
+# human_span: grobe Altersangabe in ganzen Sätzen -- "vor 6 Tagen" liest sich
+# schneller als "6d 3h". Gleiche Logik wie human_age im sketchybar-Item.
+human_span() {
+  local s="$1"
+  if [ "$s" -ge 172800 ]; then printf '%s Tagen' "$(( s / 86400 ))"
+  elif [ "$s" -ge 86400 ]; then printf '1 Tag'
+  elif [ "$s" -ge 7200 ]; then printf '%s Stunden' "$(( s / 3600 ))"
+  elif [ "$s" -ge 3600 ]; then printf '1 Stunde'
+  elif [ "$s" -ge 120 ]; then printf '%s Minuten' "$(( s / 60 ))"
+  else printf '1 Minute'; fi
+}
+
+# render_offsite: Zustand des Spiegels, rein aus Dateien gelesen -- kein Netz,
+# kein kopia-Aufruf, damit `backup status` schnell und offline benutzbar bleibt.
+# Ob gerade gespiegelt wird, verrät der Prozess und nicht die Zustandsdatei:
+# ein hart getöteter Lauf käme sonst nie aus "running" heraus.
+render_offsite() {
+  [ -r "$OFFSITE_CONF" ] || return 0
+  local st succ started prog running=0
+  st="$(offsite_get status)"
+  succ="$(offsite_get last-success)"
+  started="$(offsite_get started)"
+  prog="$(offsite_get progress)"
+  # Zeichenklasse im Muster, sonst meldet eine Shell, deren Kommandozeile
+  # diesen Begriff enthält, einen Lauf, den es nicht gibt.
+  pgrep -f 'kopia repository sync[-]to' >/dev/null 2>&1 && running=1
+
+  printf '\n'; heading "Offsite-Spiegel (Storage Box):"
+  if [ "$running" = "1" ]; then
+    local since="?"
+    [ -n "$started" ] && since="$(date -r "$started" '+%H:%M')"
+    printf '  Zustand:        läuft seit %s%s\n' "$since" "${prog:+ · $prog}"
+  else
+    case "$st" in
+      ok)          printf '  Zustand:        abgeschlossen\n' ;;
+      interrupted) printf '  Zustand:        unterbrochen — der nächste Lauf setzt fort\n' ;;
+      error)       printf '  Zustand:        FEHLER — siehe offsite-%s.log\n' "$(date +%Y-%m)" ;;
+      running)     printf '  Zustand:        abgebrochen ohne Abschluss (kein Lauf aktiv)\n' ;;
+      *)           printf '  Zustand:        noch nie gelaufen\n' ;;
+    esac
+  fi
+  if [ -n "$succ" ]; then
+    printf '  Letzter Erfolg: %s · vor %s\n' \
+      "$(date -r "$succ" '+%d.%m. %H:%M')" "$(human_span "$(( $(date +%s) - succ ))")"
+  else
+    printf '  Letzter Erfolg: —\n'
+  fi
 }
 
 load_password() {
@@ -243,6 +294,8 @@ cmd_status() {
   printf '\n'; heading "Aufbewahrung (vorhanden / max):"
   render_retention
 
+  render_offsite
+
   printf '\n%sTechnische Repo-Infos:  backup status --tech%s\n' "$dim" "$reset"
 }
 
@@ -382,6 +435,254 @@ cmd_verify() {
   kopia snapshot verify "$@"
 }
 
+# --- Offsite-Spiegel --------------------------------------------------------
+
+# Gespiegelt werden die Blobs des lokalen Repos, nicht dessen Snapshots: kein
+# zweites Repository mit eigener Retention, sondern ein Abbild desselben.
+# Ein Snapshot-Lauf, eine Passphrase, ein zu prüfender Zustand. Der Preis --
+# eine lokale Beschädigung wandert mit -- wird von den serverseitigen
+# Snapshots der Storage Box aufgefangen.
+#
+# Abbruch ist hier ausdrücklich kein Fehler. Der Rechner wird abgestöpselt,
+# der Deckel fällt zu, das WLAN wechselt. `sync-to` arbeitet blobweise und
+# idempotent: ein abgebrochener Lauf hinterlässt ein gültiges, nur
+# unvollständiges Ziel, der nächste macht dort weiter. Deshalb drei Zustände
+# statt zwei -- und nur "error" ist laut.
+#
+# Die Zustandswerte bleiben englisch und einwortig (running/ok/interrupted/
+# error): sie werden verglichen, nicht gelesen. Die deutschen Sätze dazu
+# stehen dort, wo sie jemand sieht -- in cmd_status und in sketchybar.
+
+offsite_log() {
+  mkdir -p "$LOG_DIR"
+  printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_DIR/offsite-$(date +%Y-%m).log"
+}
+
+# offsite_set: ein Wert pro Datei, wie last-mounted im Snapshot-Skript.
+# sketchybar liest sie mit einem einzigen cat je Zeile.
+offsite_set() {
+  mkdir -p "$STATE_DIR"
+  printf '%s' "$2" > "$STATE_DIR/offsite-$1"
+}
+
+offsite_get() {
+  [ -r "$STATE_DIR/offsite-$1" ] && cat "$STATE_DIR/offsite-$1" || true
+}
+
+# load_password_unattended: für den Spiegel bewusst ohne 1Password. `op read`
+# verlangt eine entsperrte App und einen angemeldeten Benutzer -- im Hintergrund
+# hängt es oder scheitert, und ein Backup-Upload, der auf einen Fingerabdruck
+# wartet, ist keiner. Also dieselbe Quelle wie im stündlichen Snapshot-Skript:
+# die Datei. Ein bereits gesetztes $KOPIA_PASSWORD hat weiterhin Vorrang.
+load_password_unattended() {
+  [ -n "${KOPIA_PASSWORD:-}" ] && return 0
+  [ -r "$PW_FILE" ] || die "Passwortdatei nicht lesbar: $PW_FILE (der Spiegel läuft ohne 1Password)"
+  export KOPIA_PASSWORD
+  KOPIA_PASSWORD="$(cat "$PW_FILE")"
+}
+
+load_offsite_conf() {
+  [ -r "$OFFSITE_CONF" ] || die "keine Offsite-Konfiguration: $OFFSITE_CONF (Vorlage: docs/offsite.conf.example)"
+  set -a
+  # shellcheck disable=SC1090
+  . "$OFFSITE_CONF"
+  set +a
+  local missing="" v
+  for v in OFFSITE_HOST OFFSITE_PORT OFFSITE_USER OFFSITE_PATH OFFSITE_KEYFILE OFFSITE_KNOWN_HOSTS; do
+    [ -n "${!v:-}" ] || missing="$missing $v"
+  done
+  [ -z "$missing" ] || die "unvollständige Offsite-Konfiguration:$missing"
+  [ -r "$OFFSITE_KEYFILE" ] || die "SSH-Key nicht lesbar: $OFFSITE_KEYFILE"
+  [ -r "$OFFSITE_KNOWN_HOSTS" ] || die "known_hosts nicht lesbar: $OFFSITE_KNOWN_HOSTS"
+  OFFSITE_PARALLEL="${OFFSITE_PARALLEL:-4}"
+}
+
+# offsite_reachable: TCP-Test statt SSH-Handshake. Er reicht, um "Netz weg"
+# von "kopia hat sich verschluckt" zu unterscheiden, und hängt nicht minutenlang.
+offsite_reachable() {
+  nc -z -w 8 "$OFFSITE_HOST" "$OFFSITE_PORT" >/dev/null 2>&1
+}
+
+# Zeilen, an denen ein verlorenes Netz zu erkennen ist. Der Nachtest auf
+# Erreichbarkeit allein genügt nicht: nach dem Aufwachen ist das WLAN oft
+# längst wieder da, obwohl genau dieser Aussetzer den Lauf beendet hat.
+OFFSITE_ABORT_PATTERN='connection lost|connection reset|broken pipe|EOF|i/o timeout|no route to host|network is (unreachable|down)|use of closed network connection|context canceled|connection refused|handshake failed|server unexpectedly closed|dial tcp'
+
+# offsite_watch: hält den Fortschritt dort fest, wo sketchybar und
+# `backup status` ihn finden.
+#
+# kopia meldet ihn auf der Konsole in Zeilen wie
+#   "  Copied 120 blobs (603.2 MB), Speed: 4.6 MB/s, ETA: 11h16m58s (2026-08-22 …)"
+# -- getrennt durch Wagenrückläufe, weshalb die Ausgabe vor dieser Datei durch
+# `tr` läuft. Gespeichert wird die Zeile roh: was davon in eine 200 Pixel breite
+# Bar passt, entscheidet die Anzeige und nicht der Erzeuger.
+#
+# $1 = Datei mit der Ausgabe, $2 = PID des Laufs.
+offsite_watch() {
+  local out="$1" pid="$2" line
+  # Eigene Subshell, eigene Regeln: unter `set -e` wäre diese Schleife nach dem
+  # ersten Durchlauf tot. In den ersten Minuten listet kopia nur und schreibt
+  # keine einzige "Copied"-Zeile -- grep endet dann mit 1 und riss den Wächter
+  # mit. Genau so ist es beim ersten Anlauf auch passiert.
+  set +e
+  while kill -0 "$pid" 2>/dev/null; do
+    # Nur das Ende der Datei ansehen: sie wächst über Stunden auf Zehntausende
+    # Zeilen, und interessant ist immer nur die letzte.
+    # Nur vollständige Zeilen: die letzte ist oft die, an der kopia gerade
+    # schreibt ("Copied 1058 blobs (24"), und daraus wird keine Anzeige.
+    # Vollständig heißt: sie endet auf die Klammer der voraussichtlichen
+    # Fertigstellung.
+    line="$(tail -c 4000 "$out" 2>/dev/null | grep -E "Copied .*\)[[:space:]]*$" | tail -1)"
+    if [ -n "$line" ]; then
+      offsite_set progress "$(printf '%s' "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    fi
+    sleep 10
+  done
+}
+
+cmd_mirror() {
+  local mode="normal"
+  case "${1:-}" in
+    --dry-run|-n) mode="dry" ;;
+    --first)      mode="first" ;;
+    "")           ;;
+    *)            die "usage: backup mirror [--dry-run|--first]" ;;
+  esac
+
+  load_offsite_conf
+  mkdir -p "$STATE_DIR" "$LOG_DIR"
+
+  # --- Vorprüfung: fehlt eine Voraussetzung, ist das kein Fehler ----------
+  if [ ! -d "$REPO_PATH" ]; then
+    offsite_log "übersprungen: $REPO_PATH nicht gemountet"
+    info "Backup-Platte nicht angeschlossen — nichts zu tun."
+    return 0
+  fi
+  if ! offsite_reachable; then
+    offsite_log "übersprungen: $OFFSITE_HOST:$OFFSITE_PORT nicht erreichbar"
+    info "Storage Box nicht erreichbar — nichts zu tun."
+    return 0
+  fi
+  load_password_unattended
+  if ! kopia repository status >/dev/null 2>&1; then
+    kopia repository connect filesystem --path="$REPO_PATH" >/dev/null 2>&1 || {
+      offsite_log "übersprungen: Repository nicht verbindbar"
+      info "Repository nicht verbindbar — nichts zu tun."
+      return 0
+    }
+  fi
+
+  local args=(
+    repository sync-to sftp
+    --host "$OFFSITE_HOST" --port "$OFFSITE_PORT" --username "$OFFSITE_USER"
+    --path "$OFFSITE_PATH"
+    --keyfile "$OFFSITE_KEYFILE" --known-hosts "$OFFSITE_KNOWN_HOSTS"
+    --parallel "$OFFSITE_PARALLEL"
+    --update --progress
+  )
+  case "$mode" in
+    # Trockenlauf: beweist den Pfad, bevor ein falscher --path klaglos ein
+    # zweites Repository an der falschen Stelle anlegt.
+    dry)   args+=(--dry-run) ;;
+    # Erstabgleich: es gibt nichts zu löschen, und das Ziel ist noch leer.
+    first) ;;
+    # Danach beides. --delete hält die Box deckungsgleich; ohne das blieben
+    # lokal geprunte Blobs dort für immer liegen und das Ziel wüchse
+    # unbegrenzt. --must-exist meldet lautstark, wenn das Ziel unerwartet
+    # leer ist, statt stillschweigend 189 GB neu hochzuladen.
+    *)     args+=(--delete --must-exist) ;;
+  esac
+
+  offsite_set last-attempt "$(date +%s)"
+  offsite_set started "$(date +%s)"
+  offsite_set status "running"
+  offsite_set progress ""
+  offsite_log "starte Spiegel ($mode) nach $OFFSITE_USER:$OFFSITE_PATH"
+
+  # caffeinate -i hält den Rechner wach, solange der Deckel offen ist. Gegen
+  # zugeklappt hilft es nicht -- dafür ist der Abbruchpfad da, nicht dagegen.
+  local tmp_err; tmp_err="$(mktemp -t kopia-offsite)"
+  local rc=0 kpid wpid
+  # Die Fortschrittszeilen sind durch Wagenrückläufe getrennt; ohne `tr` wäre
+  # die Datei eine einzige endlose Zeile und `tail` daran nutzlos. Die
+  # Prozessersetzung hält kopia im Vordergrund, damit $! und `wait` weiterhin
+  # dessen Exit-Code liefern -- in einer Pipeline täten sie das nicht.
+  caffeinate -i kopia "${args[@]}" > >(tr '\r' '\n' > "$tmp_err") 2>&1 &
+  kpid=$!
+  offsite_watch "$tmp_err" "$kpid" &
+  wpid=$!
+
+  # Ctrl-C und `kill` sind erwartete Enden, keine Störfälle. Der Spiegel nimmt
+  # kopia mit, statt es verwaist weiterlaufen zu lassen.
+  # shellcheck disable=SC2064
+  trap "kill $kpid $wpid 2>/dev/null; offsite_set status interrupted; offsite_set progress ''; offsite_log 'unterbrochen (Signal)'; exit 0" INT TERM
+
+  # set +e, weil ein Abbruch von kopia hier gerade eingeordnet werden soll und
+  # nicht das Skript beenden darf.
+  set +e
+  wait "$kpid"
+  rc=$?
+  set -e
+  kill "$wpid" 2>/dev/null || true
+  wait "$wpid" 2>/dev/null || true
+  # `tr` hängt in einer eigenen Prozessersetzung und ist beim Ende von kopia
+  # nicht zwingend schon durch. Die letzten Zeilen sind aber genau die, an
+  # denen gleich ein Abbruch von einem Fehler unterschieden wird.
+  sleep 1
+
+  trap - INT TERM
+  offsite_set progress ""
+
+  # Was kopia zu sagen hat, gehört ins Log -- außer dem Fortschritt. Der macht
+  # über Stunden Zehntausende Zeilen und begrübe jede echte Meldung unter sich.
+  if [ -s "$tmp_err" ]; then
+    while IFS= read -r line; do
+      [ -n "$line" ] && offsite_log "kopia: $line"
+    done < <(grep -v "Copied .* blobs" "$tmp_err" | tail -20)
+  fi
+
+  if [ "$rc" -eq 0 ]; then
+    offsite_set status "ok"
+    [ "$mode" = "dry" ] || offsite_set last-success "$(date +%s)"
+    offsite_log "Spiegel abgeschlossen ($mode)"
+    rm -f "$tmp_err"
+    info "Spiegel abgeschlossen."
+    return 0
+  fi
+
+  # --- Abbruch von Fehler unterscheiden -----------------------------------
+  local reason=""
+  case "$rc" in
+    # 129 HUP, 130 INT, 137 KILL, 143 TERM -- alles Wege, auf denen ein Lauf
+    # beendet wird, ohne dass mit dem Spiegel etwas nicht stimmt.
+    129|130|137|143) reason="Signal $(( rc - 128 ))" ;;
+  esac
+  if [ -z "$reason" ] && [ ! -d "$REPO_PATH" ]; then
+    reason="Backup-Platte verschwunden"
+  fi
+  if [ -z "$reason" ] && ! offsite_reachable; then
+    reason="Storage Box nicht mehr erreichbar"
+  fi
+  if [ -z "$reason" ] && grep -qEi "$OFFSITE_ABORT_PATTERN" "$tmp_err" 2>/dev/null; then
+    reason="Verbindung abgerissen"
+  fi
+
+  if [ -n "$reason" ]; then
+    offsite_set status "interrupted"
+    offsite_log "unterbrochen: $reason (exit $rc) — der nächste Lauf macht weiter"
+    rm -f "$tmp_err"
+    info "Spiegel unterbrochen: $reason. Kein Fehler — der nächste Lauf setzt fort."
+    return 0
+  fi
+
+  offsite_set status "error"
+  offsite_log "FEHLER: kopia sync-to endete mit $rc"
+  printf 'backup: Spiegel fehlgeschlagen (exit %s). Letzte Ausgabe:\n' "$rc" >&2
+  tail -5 "$tmp_err" >&2
+  rm -f "$tmp_err"
+  return 1
+}
+
 cmd_help() {
   cat <<'EOF'
 backup - Kopia backup wrapper
@@ -404,6 +705,11 @@ Commands:
                                ohne [snap] + gum/TTY: interaktive Auswahl
   policy [target]              show policy
   verify [args]                verify snapshots
+  mirror [--dry-run|--first]   Repo-Blobs auf die Hetzner Storage Box spiegeln
+                               --dry-run: nur zeigen, nichts übertragen
+                               --first:   Erstabgleich (ohne --delete/--must-exist)
+                               Abbruch (Netz weg, Platte weg, Ctrl-C) ist kein
+                               Fehler: Exit 0, der nächste Lauf setzt fort.
   maintenance [args]           run maintenance
   help                         this help
 
@@ -411,6 +717,15 @@ Password resolution order:
   1. $KOPIA_PASSWORD (if already exported)
   2. 1Password via `op read "$BACKUP_OP_REF"` (default: item "Verschlüsselung Backups" in Private; UUID-based ref because op rejects non-ASCII)
   3. $BACKUP_PW_FILE (fallback plaintext file)
+  `mirror` überspringt Schritt 2: der Lauf muss unbeaufsichtigt
+  durchgehen, und `op read` verlangt eine entsperrte App.
+
+Offsite-Spiegel:
+  Ziel und Zugang stehen in $BACKUP_OFFSITE_CONF (Vorgabe:
+  ~/.config/kopia/offsite.conf, Modus 0600, bewusst außerhalb von Git).
+  Vorlage: r-tools/docs/offsite.conf.example
+  Zustand: ~/.local/state/kopia/offsite-{status,last-success,last-attempt,started,progress}
+  Log:     ~/Library/Logs/kopia/offsite-JJJJ-MM.log
 
 Env overrides:
   BACKUP_REPO_PATH    (default: /Volumes/Backups/kopia-r-mac)
@@ -418,6 +733,7 @@ Env overrides:
   BACKUP_OP_REF       1Password secret reference (set empty to disable)
   BACKUP_PW_FILE      (default: ~/.config/kopia/.password)
   BACKUP_MOUNT_BASE   (default: /tmp/kopia-mount)
+  BACKUP_OFFSITE_CONF (default: ~/.config/kopia/offsite.conf)
 
 Examples:
   backup status
@@ -450,6 +766,7 @@ case "$cmd" in
   show|cat)            cmd_show "$@" ;;
   policy)              cmd_policy "$@" ;;
   verify)              cmd_verify "$@" ;;
+  mirror)              cmd_mirror "$@" ;;
   maintenance|maint)   cmd_maintenance "$@" ;;
   help|-h|--help)      cmd_help ;;
   *)                   printf 'backup: unknown command: %s\n\n' "$cmd" >&2; cmd_help; exit 2 ;;

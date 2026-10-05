@@ -4,9 +4,11 @@ local settings = require("settings")
 
 local popup_width = 250
 
+-- Kompakt-Modus: nur das Lautsprecher-Icon, die Prozentzahl steckt im Popup-Slider.
 local volume_percent = sbar.add("item", "widgets.volume1", {
   display = settings.primary_display,
   position = "right",
+  drawing = not settings.compact,
   icon = { drawing = false },
   label = {
     string = "??%",
@@ -18,7 +20,7 @@ local volume_percent = sbar.add("item", "widgets.volume1", {
 local volume_icon = sbar.add("item", "widgets.volume2", {
   display = settings.primary_display,
   position = "right",
-  padding_right = -1,
+  padding_right = settings.compact and 4 or -1,
   icon = {
     string = icons.volume._100,
     width = 0,
@@ -72,7 +74,7 @@ local volume_slider = sbar.add("slider", popup_width, {
   click_script = 'osascript -e "set volume output volume $PERCENTAGE"'
 })
 
-volume_percent:subscribe("volume_change", function(env)
+volume_icon:subscribe("volume_change", function(env)
   local volume = tonumber(env.INFO)
   local icon = icons.volume._0
   if volume > 60 then

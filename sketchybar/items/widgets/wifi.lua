@@ -57,6 +57,12 @@ local wifi_down = sbar.add("item", "widgets.wifi2", {
   y_offset = -4,
 })
 
+-- Kompakt-Modus: nur das Wifi-Icon, die Raten bleiben dem Popup vorbehalten.
+if settings.compact then
+  wifi_up:set({ drawing = false })
+  wifi_down:set({ drawing = false })
+end
+
 local wifi = sbar.add("item", "widgets.wifi.padding", {
   display = settings.primary_display,
   position = "right",

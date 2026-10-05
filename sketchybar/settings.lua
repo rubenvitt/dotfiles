@@ -1,6 +1,14 @@
+local system_info = require("helpers.system_info")
+
+-- Kompakt-Modus: nur das MBP-Panel (keine externe Anzeige) — die rechte
+-- Seite muss vor der Notch bleiben. Gesteuert ueber die Display-Breite,
+-- siehe helpers/system_info.lua.
+local compact = system_info.compact
+
 return {
-  paddings = 3,
-  group_paddings = 5,
+  compact = compact,
+  paddings = compact and 2 or 3,
+  group_paddings = compact and 3 or 5,
 
   icons = "sf-symbols", -- alternatively available: NerdFont
 

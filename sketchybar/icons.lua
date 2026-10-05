@@ -13,6 +13,9 @@ local icons = {
       on = "􁏮",
       off = "􁏯",
     },
+    -- Amtliche Warnung. Die Stufe steckt in der Farbe, nicht im Symbol:
+    -- der DWD faerbt seine vier Stufen, er zeichnet sie nicht verschieden.
+    warning = "􀇿",   -- exclamationmark.triangle.fill
     volume = {
       _100="􀊩",
       _66="􀊧",
@@ -34,6 +37,21 @@ local icons = {
       connected = "􀙇",
       disconnected = "􀙈",
       router = "􁓤",
+    },
+    tailscale = {
+      connected    = "􀙧",   -- shield.fill
+      disconnected = "􀙦",   -- shield
+      exit_node    = "􀙨",   -- shield.lefthalf.filled
+    },
+    -- Phönix-Progression (items/phoenix.lua): ein eigenes Symbol je Zustand,
+    -- damit die Bar Feuer, Aschezeit und Urlaub auch ohne Popup trennt. Der
+    -- Funke ist die Glut, aus der der nächste Feuersturm entsteht; die Flamme
+    -- im Umriss bleibt für "kein Feuersturm".
+    phoenix = {
+      fire     = "􀙭",   -- flame.fill           U+10066D
+      ash      = "􀫸",   -- sparkle              U+100AF8
+      vacation = "􁋻",   -- beach.umbrella.fill  U+1012FB
+      rest     = "􀙬",   -- flame                U+10066C
     },
     memory = {
       ram = "􀫦",
@@ -80,6 +98,7 @@ local icons = {
       on = "󱨥",
       off = "󱨦",
     },
+    warning = "󰀦",   -- mdi:alert
     volume = {
       _100="",
       _66="",
@@ -101,6 +120,17 @@ local icons = {
       connected = "󰖩",
       disconnected = "󰖪",
       router = "Missing Icon"
+    },
+    tailscale = {
+      connected    = "󰒘",
+      disconnected = "󰒙",
+      exit_node    = "󰦝",
+    },
+    phoenix = {
+      fire     = "󰈸",   -- mdi:fire              U+F0238
+      ash      = "󰫢",   -- mdi:star-four-points  U+F0AE2
+      vacation = "󰂒",   -- mdi:beach             U+F0092
+      rest     = "󰈸",   -- mdi:fire (Farbe unterscheidet Feuer und Leerlauf)
     },
     memory = {
       ram = "󰍛",

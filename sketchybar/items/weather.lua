@@ -14,8 +14,15 @@ local settings = require("settings")
 -- Wetter. Faellt das Netz aus, liefert der Helfer den letzten bekannten Stand
 -- samt Alter; die Anzeige verliert dann ihre Farbe und nennt das Alter --
 -- nach demselben Muster wie die gealterten Limits in items/irrlicht.lua.
+--
+-- Amtliche Warnungen kommen aus einer zweiten Quelle, helpers/warnings_probe.py:
+-- Wetterwarnungen gemeindegenau vom DWD, Bevoelkerungsschutz kreisweit von
+-- NINA. Sie haengen an einem eigenen Item links vom Wetter, damit eine Warnung
+-- die Wetterlage nicht verdeckt, und an einer eigenen Frist -- ein Unwetter ist
+-- zeitkritischer als die Temperatur.
 
 local PROBE = "/usr/bin/python3 $CONFIG_DIR/helpers/weather_probe.py"
+local WARN_PROBE = "/usr/bin/python3 $CONFIG_DIR/helpers/warnings_probe.py"
 
 -- Open-Meteo rechnet seinen current-Block im 15-Minuten-Raster fort; die
 -- Antwort nennt das selbst als "interval": 900. Haeufiger zu fragen brachte
@@ -26,6 +33,33 @@ local UPDATE_FREQ = 900
 -- Ab hier hat die Bar zwei Abfragen in Folge verpasst -- das ist kein
 -- Netzhaenger mehr, sondern ein Ausfall, und der gehoert sichtbar.
 local STALE_AFTER = 1800
+
+-- Warnungen laufen kuerzer als das Wetter: eine Unwetterwarnung, die eine
+-- Viertelstunde zu spaet ankommt, ist keine Warnung mehr. Der Helfer cacht
+-- seinerseits fuenf Minuten, ein haeufigerer Takt traefe also nur den Cache.
+local WARN_UPDATE_FREQ = 300
+
+-- Ab welcher DWD-Warnstufe die Bar anschlaegt. Stufe 1 ist Alltag und kein
+-- Ereignis -- an einem gewoehnlichen Windtag stehen bundesweit mehrere hundert
+-- gelbe Gemeindewarnungen; ein Item, das dann dauerhaft leuchtet, wird
+-- uebersehen, wenn es einmal wirklich zaehlt. Gelbe Warnungen stehen deshalb
+-- nur im Popup. Bevoelkerungsschutz zieht unabhaengig von der Stufe hoch: die
+-- kommt nicht taeglich, und wenn, dann geht es nicht ums Wetter.
+local BAR_LEVEL = 2
+
+-- Ab welcher Stufe das Warnitem den Ereignisnamen ausschreibt. Darunter steht
+-- nur das Dreieck in der Farbe der Stufe: die Bar ist voll, und ein Name wie
+-- "Einrichtung von Schutzzonen" frisst mehr Platz als ein ganzes Widget. Was
+-- gewarnt wird, steht einen Klick entfernt im Popup. Stufe 4 -- das amtliche
+-- Dunkelrot, "extremes Unwetter" -- ist die Ausnahme: da soll man nicht erst
+-- klicken muessen.
+local BAR_LABEL_LEVEL = 4
+
+-- Wie viele Warnzeilen das Popup zeigt. Der Wert ist gleich der Obergrenze im
+-- Helfer: was der ausgibt, steht auch im Popup. Zwischen beiden noch einmal zu
+-- kuerzen hiesse, Warnungen stillschweigend zu verschlucken -- die einzige
+-- Grenze soll die sein, die im Helfer begruendet steht.
+local WARN_ROWS = 5
 
 -- Popup-Raster wie in items/irrlicht.lua: die Vorgaben aus default.lua (14/13pt,
 -- 28px Zeilen) sind fuer einzelne Items in der Leiste gedacht und erzeugen in
@@ -72,6 +106,21 @@ local CONDITION = {
   [95] = { "thunder", colors.orange },     -- Gewitter
   [96] = { "hail", colors.orange },        -- Gewitter mit Hagel
   [99] = { "hail", colors.orange },
+}
+
+-- DWD-Warnstufen in der Reihenfolge des amtlichen Farbschemas: gelb, orange,
+-- rot -- und fuer Stufe 4 amtlich Dunkelrot. Dafuer steht hier Magenta: ein
+-- Dunkelrot auf dem fast schwarzen Untergrund der Leiste waere kaum vom
+-- Hintergrund zu unterscheiden, und ausgerechnet die schwerste Stufe darf
+-- nicht die unauffaelligste sein. Magenta liegt jenseits von Rot, ohne
+-- unleserlich zu werden. Stufe 0 sind Vorabinformationen und Meldungen ohne
+-- Angabe -- grau, weil sie ankuendigen statt zu warnen.
+local WARN_COLOR = {
+  [0] = colors.grey,
+  [1] = colors.yellow,
+  [2] = colors.orange,
+  [3] = colors.red,
+  [4] = colors.magenta,
 }
 
 -- Nur wo Sonne oder Mond im Symbol vorkommt, lohnt die Unterscheidung; ein
@@ -142,7 +191,7 @@ local weather = sbar.add("item", "weather", {
 
 -- Zeilen einmal anlegen: im Update-Callback erzeugt entstuende bei jedem
 -- Durchlauf ein neuer Satz Items (siehe items/menus.lua).
-local function add_row(name, value_font)
+local function add_row(name, value_font, caption_width, value_width)
   return sbar.add("item", "weather." .. name, {
     position = "popup.weather",
     drawing = false,
@@ -150,7 +199,7 @@ local function add_row(name, value_font)
     padding_right = ROW_PAD,
     icon = {
       string = "",
-      width = CAPTION_WIDTH,
+      width = caption_width or CAPTION_WIDTH,
       align = "left",
       color = colors.grey,
       padding_left = ROW_PAD,
@@ -159,13 +208,33 @@ local function add_row(name, value_font)
     },
     label = {
       string = "",
-      width = VALUE_WIDTH,
+      width = value_width or VALUE_WIDTH,
       align = "right",
       padding_left = 0,
       padding_right = ROW_PAD,
       font = { family = value_font, size = ROW_FONT },
     },
   })
+end
+
+-- Warnzeilen zuerst: sketchybar ordnet ein Popup in der Reihenfolge, in der
+-- seine Zeilen angelegt werden, und eine amtliche Warnung gehoert ueber die
+-- Stundenvorschau.
+--
+-- Die Spalten sind breiter als unten (146 + 80 gegen 78 + 116). Ein
+-- Ereignisname und ein Zeitraum passen in 194 Punkte schlicht nicht beide
+-- hinein -- ausgemessen: das Dreieck kostet 26 Punkte, ein Zeichen gut 5, und
+-- "13 – 18 Uhr" braucht 75. Das Popup ist also breiter, solange eine Warnung
+-- ansteht. Das ist der bessere Handel als eine Zeile, die scrollt oder
+-- abschneidet: Warnungen sind die Ausnahme, und wenn eine da ist, darf sie
+-- den Platz haben.
+local WARN_CAPTION_WIDTH = 146
+local WARN_VALUE_WIDTH = 80
+
+local warn_rows = {}
+for i = 1, WARN_ROWS do
+  warn_rows[i] = add_row("warning." .. i, settings.font.numbers,
+    WARN_CAPTION_WIDTH, WARN_VALUE_WIDTH)
 end
 
 -- Der Ortsname ist Fliesstext, alles andere sind Zahlen, die untereinander
@@ -183,6 +252,28 @@ local forecast_rows = {}
 for i = 1, FORECAST_ROWS do
   forecast_rows[i] = add_row("forecast." .. i, settings.font.numbers)
 end
+
+-- Eigenes Item statt eines getauschten Wettersymbols: bei Sturm will man beides
+-- wissen, dass gewarnt ist und wie das Wetter gerade ist. Es steht links vom
+-- Wetter, weil rechts angelegte Items bei sketchybar von rechts nach links
+-- einruecken -- dieses hier entsteht nach dem Wetter, landet also daneben.
+-- Es teilt sich dessen Popup; ein zweites waere derselbe Inhalt.
+local alert = sbar.add("item", "weather.alert", {
+  display = settings.primary_display,
+  position = "right",
+  -- Wie beim Wetter: das Item blendet sich ohne Warnung selbst aus und
+  -- bekaeme unter der Vorgabe "when_shown" nie wieder einen Durchlauf.
+  updates = true,
+  update_freq = WARN_UPDATE_FREQ,
+  drawing = false,
+  icon = {
+    string = icons.warning,
+    color = colors.orange,
+    padding_right = 4,
+  },
+  label = { color = colors.orange },
+  click_script = "sketchybar --set weather popup.drawing=toggle",
+})
 
 -- relocate laesst den Helfer den Standort neu bestimmen statt seinen Cache zu
 -- benutzen. Genau dafuer ist system_woke da: zwischen Zuklappen und Aufklappen
@@ -301,9 +392,124 @@ local function update(relocate)
   end)
 end
 
+-- Farbe einer Warnung. Grau steht in dieser Leiste fuer "gealtert" -- eine
+-- Meldung des Bevoelkerungsschutzes ohne Stufenangabe grau zu zeichnen hiesse
+-- also, sie fuer veraltet zu erklaeren. Sie bekommt deshalb die mildeste
+-- Warnfarbe. Beim DWD bleibt Stufe 0 grau: das sind Vorabinformationen, die
+-- ankuendigen statt zu warnen.
+local function warn_color(w)
+  if w.src == "nina" and w.level == 0 then return colors.yellow end
+  return WARN_COLOR[w.level] or colors.grey
+end
+
+-- Aktualisiert Warnitem und Warnzeilen. Bewusst getrennt von update(): die
+-- beiden Quellen haben eigene Fristen und eigene Ausfaelle, und ein stiller
+-- Wetterdienst darf keine Warnung loeschen (und umgekehrt).
+local function update_warnings()
+  sbar.exec(WARN_PROBE, function(out)
+    local state, age, warnings = nil, 0, {}
+    for line in string.gmatch(out or "", "[^\r\n]+") do
+      if string.sub(line, 1, 1) == "S" then
+        state, age = string.match(line, "^S|(%a+)|(%d+)$")
+        age = tonumber(age) or 0
+      else
+        local src, level, name, span =
+          string.match(line, "^A|(%a+)|(%d)|([^|]*)|([^|]*)$")
+        if src then
+          -- Der Text stammt aus einer fremden Antwort und landet nur in
+          -- Beschriftungen, nie in einem click_script.
+          warnings[#warnings + 1] = {
+            src = src, level = tonumber(level), name = name, span = span,
+          }
+        end
+      end
+    end
+
+    -- "abroad" heisst, dass hier niemand warnt, "unknown" heisst, dass wir es
+    -- nicht wissen. Beides fuehrt zur selben leeren Anzeige, denn eine
+    -- erfundene Entwarnung waere schlimmer als gar keine Aussage -- der
+    -- Unterschied steht deshalb im Helfer und nicht in der Bar.
+    if state ~= "de" then
+      alert:set({ drawing = false })
+      for i = 1, WARN_ROWS do warn_rows[i]:set({ drawing = false }) end
+      return
+    end
+
+    -- Gealterte Warnungen verlieren die Farbe, wie das gealterte Wetter. Der
+    -- Helfer wirft abgelaufene Warnungen selbst heraus, hier bleibt also nur
+    -- der Fall "seit einer Weile nichts Neues gehoert".
+    local stale = age > STALE_AFTER
+
+    for i = 1, WARN_ROWS do
+      local w = warnings[i]
+      if w then
+        warn_rows[i]:set({
+          drawing = true,
+          icon = {
+            string = icons.warning .. "  " .. w.name,
+            color = stale and colors.grey or warn_color(w),
+          },
+          label = { string = w.span, color = stale and colors.grey or colors.white },
+        })
+      else
+        warn_rows[i]:set({ drawing = false })
+      end
+    end
+
+    -- In der Bar steht nur, was die Schwelle nimmt: ab Stufe 2, und jede
+    -- Meldung des Bevoelkerungsschutzes. Der Helfer sortiert nach Stufe, die
+    -- erste passende ist also die schaerfste.
+    local lead, others = nil, 0
+    for _, w in ipairs(warnings) do
+      if w.level >= BAR_LEVEL or w.src == "nina" then
+        if lead then others = others + 1 else lead = w end
+      end
+    end
+
+    if not lead then
+      alert:set({ drawing = false })
+      return
+    end
+
+    -- Unterhalb von Stufe 4 bleibt das Item ein blosses Dreieck. Ein Zaehler
+    -- fuer weitere Warnungen stuende hier gut, waere aber genau das Stueck
+    -- Text, das die Bar nicht hergibt -- wie viele es sind, steht im Popup.
+    local label = ""
+    if lead.level >= BAR_LABEL_LEVEL then
+      -- Auf die Laenge achtet der Helfer; er kuerzt auf das Mass der
+      -- Popup-Zeile. Hier ein zweites Mal zu schneiden gaebe zwei Ellipsen.
+      label = lead.name
+      if others > 0 then label = label .. " +" .. others end
+    end
+    local color = stale and colors.grey or warn_color(lead)
+
+    alert:set({
+      drawing = true,
+      icon = {
+        color = color,
+        -- Ohne Beschriftung sitzt das Dreieck sonst links an der Kante: der
+        -- rechte Abstand ist fuer den Text da, den es dann nicht gibt.
+        padding_right = label == "" and settings.paddings or 4,
+      },
+      -- Eine leere Beschriftung ist nicht umsonst: sketchybar rechnet ihre
+      -- Polster mit, auch wenn nichts darin steht -- gemessen sieben Punkte,
+      -- die hinter dem Dreieck verpuffen. Sie gehört also ausgeblendet und
+      -- nicht bloß geleert. Und wieder eingeblendet, sobald ein Name kommt:
+      -- sonst bliebe sie nach dem ersten blanken Dreieck für immer weg.
+      label = { string = label, color = color, drawing = label ~= "" },
+    })
+  end)
+end
+
 -- Zwei Abonnements statt eines mit env.SENDER: welches Ereignis den Durchlauf
 -- ausgeloest hat, steht damit im Code und nicht in einer Zeichenkette.
 weather:subscribe({ "routine", "forced" }, function() update(false) end)
 weather:subscribe("system_woke", function() update(true) end)
 
+-- Das Warnitem haengt an seiner eigenen Frist, holt sich beim Aufwachen aber
+-- denselben Anstoss: nach dem Zuklappen kann ein Ortswechsel liegen, und der
+-- Standort, den der Helfer liest, ist dann gerade neu bestimmt worden.
+alert:subscribe({ "routine", "forced", "system_woke" }, update_warnings)
+
 update(false)
+update_warnings()

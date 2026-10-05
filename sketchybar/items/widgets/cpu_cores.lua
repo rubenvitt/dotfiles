@@ -6,21 +6,17 @@ local settings = require("settings")
 -- Datenquelle ist der Event-Provider cpu_cores, der host_processor_info()
 -- auswertet und "cpu_cores_update" mit einer komma-separierten Liste feuert.
 
-local function sysctl(key)
-  local handle = io.popen("sysctl -n " .. key .. " 2>/dev/null")
-  if not handle then return nil end
-  local out = handle:read("*a")
-  handle:close()
-  return tonumber(out)
-end
+-- Die sysctl-Werte holt helpers/system_info ganz am Anfang der Config; ein
+-- io.popen an dieser Stelle haengt in pclose(), sobald sbar.exec den Prozess
+-- einmal geforkt hat (Details dort).
+local system_info = require("helpers.system_info")
 
-local CORE_COUNT = sysctl("hw.ncpu") or 8
+local CORE_COUNT = system_info.cpu_count
 
 -- Auf Apple Silicon liefert host_processor_info die Efficiency-Kerne zuerst
 -- (auf dem M3 Max empirisch Index 0..3). Die breitere Lücke trennt sie optisch
 -- von den Performance-Kernen; auf homogenen CPUs existiert perflevel1 nicht.
-local EFFICIENCY_CORES = sysctl("hw.perflevel1.logicalcpu") or 0
-if EFFICIENCY_CORES >= CORE_COUNT then EFFICIENCY_CORES = 0 end
+local EFFICIENCY_CORES = system_info.efficiency_cores
 
 local BAR_WIDTH = 3
 local BAR_GAP = 2
@@ -114,9 +110,9 @@ local total = sbar.add("item", "widgets.cpu_cores.total", {
   icon = { drawing = false },
   label = {
     string = "--%",
-    width = 40,
+    width = settings.compact and 34 or 40,
     align = "right",
-    padding_left = 6,
+    padding_left = settings.compact and 0 or 6,
     padding_right = 0,
     color = colors.white,
     font = {
@@ -133,7 +129,9 @@ members[#members + 1] = total.name
 
 local bars = {}
 
-for index = CORE_COUNT - 1, 0, -1 do
+-- Im Kompakt-Modus (nur MBP-Panel) entfallen die Kern-Balken; die
+-- Gesamtzahl bleibt, der Handler ueberspringt fehlende bars[index].
+for index = (settings.compact and -1 or CORE_COUNT - 1), 0, -1 do
   -- Explizites background.padding_right statt Item-Padding: bei gesetztem
   -- width zählt das Item-Padding zur Gesamtbreite und verschiebt die Balken
   -- ineinander; der Background-Rand lässt sie dagegen sauber bündig stehen.
@@ -341,6 +339,7 @@ end
 -- Jeder Balken ist nur wenige Punkt breit; erst alle zusammen ergeben eine
 -- Klickfläche über die ganze Widget-Breite.
 cpu_cores:subscribe("mouse.clicked", toggle_popup)
+total:subscribe("mouse.clicked", toggle_popup)
 trailing:subscribe("mouse.clicked", toggle_popup)
 for _, bar in pairs(bars) do
   bar:subscribe("mouse.clicked", toggle_popup)

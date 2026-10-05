@@ -1,10 +1,5 @@
 font-family = "PT Mono"
-#theme = "dark:Argonaut,light:GitHub Light Default"
 theme = "dark:catppuccin-mocha.conf,light:catppuccin-latte.conf"
-#theme = "ayu"
-#theme = "Highway"
-#theme = "catppuccin-mocha.conf"
-#theme = "Argonaut"
 selection-background = "#ffa500"
 selection-foreground = "#ffffff"
 cursor-color = "#ffa500"
@@ -19,3 +14,17 @@ background-blur = 200
 scrollback-limit = 52428800
 link-previews = true
 link-url = true
+
+# Linke Option als Alt für fish-Kürzel (Alt+←/→, Alt+E, Alt+S), rechte bleibt für @ { } [ ] |
+macos-option-as-alt = left
+mouse-hide-while-typing = true
+window-save-state = always
+quick-terminal-screen = mouse
+
+# Mitteilung, wenn ein Befehl > 10 s läuft und das Fenster nicht im Fokus ist
+notify-on-command-finish = unfocused
+notify-on-command-finish-action = notify,no-bell
+notify-on-command-finish-after = 10s
+
+# Terminfo und TERM-Fallback auf SSH-Hosts, sudo behält die Shell-Integration
+shell-integration-features = ssh-terminfo,ssh-env,sudo

@@ -40,12 +40,16 @@ function fish_greeting
     printf "  %s▸ %sdisk    %s%s\n" $dc $dim $r "$disk"
     printf "  %s▸ %snode    %sv%s\n" $magenta $dim $r "$nv"
 
-    # Docker (nur wenn Container laufen)
+    # Docker (nur wenn Container laufen): Wert vom letzten Start, docker ps läuft im Hintergrund
     if command -q docker
-        set -l cnt (docker ps -q 2>/dev/null | count)
-        if test "$cnt" -gt 0
+        set -l cache ~/.cache/fish/docker_running
+        set -l cnt (cat $cache 2>/dev/null)
+        if test -n "$cnt"; and test "$cnt" -gt 0
             printf "  %s▸ %sdocker  %s%s running%s\n" $blue $dim $green $cnt $r
         end
+        mkdir -p (path dirname $cache)
+        fish --no-config -c "docker ps -q 2>/dev/null | count > $cache" &
+        disown $last_pid
     end
 
     # Git branch (nur wenn in einem Repo)

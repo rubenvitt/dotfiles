@@ -1,18 +1,6 @@
 [include]
 	path = ~/.config/git/base.gitconfig
 
-[includeIf "gitdir:~/dev/work/**"]
-	path = ~/.config/git/work.gitconfig
-[includeIf "gitdir:~/.dotfiles/"]
-        path = ~/.config/git/personal.gitconfig
-[includeIf "gitdir:~/dev/personal/"]
-	path = ~/.config/git/personal.gitconfig
-[includeIf "gitdir:~/dev/edu/"]
-        path = ~/.config/git/personal.gitconfig
-[includeIf "gitdir:~/dev/dearinnovation/"]
-        path = ~/.config/git/dearinnovation.gitconfig
-[includeIf "gitdir:~.codex/worktrees/"]
-		path = ~/.config/git/personal.gitconfig
 [core]
 	autocrlf = input
 [commit]
@@ -66,3 +54,23 @@
 [credential "https://gist.github.com"]
 	helper = 
 	helper = !/opt/homebrew/bin/gh auth git-credential
+
+# Die bedingten Includes stehen bewusst am Dateiende: Git wertet von oben nach
+# unten aus, spätere Werte gewinnen. Nur hier unten können sie die globalen
+# Vorgaben weiter oben (etwa commit.gpgsign) tatsächlich überschreiben.
+[includeIf "gitdir:~/dev/work/"]
+	path = ~/.config/git/work.gitconfig
+[includeIf "gitdir:~/dev/work/innoq/"]
+	path = ~/.config/git/innoq.gitconfig
+[includeIf "gitdir:~/.dotfiles/"]
+        path = ~/.config/git/personal.gitconfig
+[includeIf "gitdir:~/dev/personal/"]
+	path = ~/.config/git/personal.gitconfig
+[includeIf "gitdir:~/wnotes/shared-vaults/"]
+	path = ~/.config/git/personal.gitconfig
+[includeIf "gitdir:~/dev/edu/"]
+        path = ~/.config/git/personal.gitconfig
+[includeIf "gitdir:~/dev/dearinnovation/"]
+        path = ~/.config/git/dearinnovation.gitconfig
+[includeIf "gitdir:~.codex/worktrees/"]
+		path = ~/.config/git/personal.gitconfig

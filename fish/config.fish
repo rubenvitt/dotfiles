@@ -23,6 +23,7 @@ end
 #set -gx PATH /Users/rubeen/.asdf/shims $PATH
 if status is-interactive
     starship init fish | source
+    enable_transience
     atuin init fish | sed "s/-k up/up/g" | source
     zoxide init --cmd cd fish | source
 end

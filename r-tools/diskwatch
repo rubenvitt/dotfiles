@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# diskwatch - Löscht cargo-Build-Artefakte, sobald die Platte zu voll wird
+# diskwatch - Löscht Build-Artefakte und Docker-Reste, sobald die Platte zu voll wird
 set -euo pipefail
 
 # Warum es dieses Skript gibt: Parallel laufende Agent-Sessions bauen Rust mit
@@ -14,7 +14,17 @@ set -euo pipefail
 #
 # Gelöscht werden ausschließlich Build-Artefakte, auch wenn gerade ein Build
 # hineinschreibt — der Build scheitert dann oder baut neu, verliert aber keine
-# Arbeit. Quellcode, Worktrees und Docker bleiben unangetastet.
+# Arbeit. Quellcode und Worktrees bleiben unangetastet.
+#
+# Reicht das nicht, folgen zwei teurere Stufen, höchstens einmal pro Stunde:
+# Stufe 2 räumt Docker-Build-Cache, node_modules/target in seit
+# DISKWATCH_STALE_DAYS unberührten Projekten und den pnpm-Store; Stufe 3
+# gestoppte Container und ungenutzte Images. Die Stufen sind gestaffelt, weil
+# Fotos und VMs nie schrumpfen: ohne Staffel und Pause würde jedes Image eine
+# Minute nach dem Stopp seines Containers verschwinden. Lokal gebaute Images
+# (testbed-*:SNAPSHOT) lassen sich nicht neu pullen, deshalb kommen Images
+# zuletzt und nur, wenn sie älter als 24 h sind. Docker-Volumes bleiben immer
+# stehen — darin liegen die Datenbanken.
 
 LABEL="dev.rubeen.diskwatch"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
@@ -27,24 +37,42 @@ SCRATCH_ROOT="/private/tmp/claude-501"
 # Nur in Worktrees löschen — ein Target im Hauptrepo gehört einer laufenden IDE.
 WORKTREE_ROOTS=("$HOME/dev" "$HOME/.codex/worktrees" "$HOME/orca/workspaces")
 
+STALE_DAYS="${DISKWATCH_STALE_DAYS:-30}"
+DEV_ROOT="$HOME/dev"
+DEEP_STAMP="$HOME/Library/Caches/$LABEL.deep"
+DOCKER_SOCK="$HOME/.orbstack/run/docker.sock"
+# launchd gibt nur /usr/bin:/bin:/usr/sbin:/sbin vor, deshalb absolute Pfade.
+DOCKER_BINS=(/opt/homebrew/bin/docker /usr/local/bin/docker "$HOME/.orbstack/bin/docker")
+ORBCTL_BINS=(/opt/homebrew/bin/orbctl /usr/local/bin/orbctl "$HOME/.orbstack/bin/orbctl")
+PNPM_BINS=("$HOME/.local/share/mise/installs/pnpm/latest/pnpm" /opt/homebrew/bin/pnpm "$HOME/Library/pnpm/pnpm")
+
 usage() {
   cat <<EOF
-diskwatch - Löscht cargo-Build-Artefakte, sobald die Platte zu voll wird
+diskwatch - Löscht Build-Artefakte und Docker-Reste, sobald die Platte zu voll wird
 
   diskwatch check       Unter ${THRESHOLD_GB} GB frei aufräumen, sonst nichts tun (ruft launchd auf)
-  diskwatch now         Sofort aufräumen, unabhängig vom freien Platz
+  diskwatch now         Sofort Stufe 1 aufräumen, weitere Stufen nur unter der Schwelle
+  diskwatch deep        Sofort alle drei Stufen aufräumen
   diskwatch list        Zeigen, was gelöscht würde, mit Größe
   diskwatch install     LaunchAgent einrichten (prüft jede Minute)
   diskwatch uninstall   LaunchAgent entfernen
   diskwatch status      LaunchAgent, freien Platz, Swap und letzte Logzeilen zeigen
 
-Gelöscht werden:
+Stufe 1, bei jeder Prüfung unter der Schwelle:
   - cargo-Targets in Session-Scratchpads unter $SCRATCH_ROOT
   - ~/.cache/cargo-target/debug und ~/.cache/cargo-target-*
   - target/ in Worktrees (.claude/worktrees, .worktrees, ~/.codex/worktrees, ~/orca/workspaces)
+Stufe 2, wenn danach noch unter der Schwelle (höchstens stündlich):
+  - Docker-Build-Cache (nur wenn OrbStack schon läuft)
+  - node_modules/ und cargo-target/ (target/ neben Cargo.toml) in ~/dev, deren Repo seit ${STALE_DAYS} Tagen unverändert ist
+  - pnpm store prune
+Stufe 3, wenn dann noch unter der Schwelle:
+  - gestoppte Docker-Container, ungenutzte Images älter als 24 h
+  Docker-Volumes werden nie gelöscht.
 
 Umgebung:
   DISKWATCH_THRESHOLD_GB   Schwelle in GB (Standard 50)
+  DISKWATCH_STALE_DAYS     Ab wann ein Projekt als unberührt gilt (Standard 30)
 
 Log: $LOG
 EOF
@@ -91,10 +119,79 @@ candidates() {
   fi
 }
 
-cleanup() {
-  local before p size
-  before="$(free_gb)"
-  log "frei: ${before} GB — räume auf"
+# Wurzel des Repos (oder Worktrees), zu dem ein Verzeichnis gehört.
+project_root() {
+  local d="$1"
+  while [[ "$d" != "$DEV_ROOT" && "$d" != / ]]; do
+    if [[ -e "$d/.git" ]]; then echo "$d"; return 0; fi
+    d="$(dirname "$d")"
+  done
+  echo "$1"
+}
+
+# node_modules/ und cargo-target/ (target/ neben Cargo.toml) in ~/dev, deren
+# Repo seit STALE_DAYS Tagen keine Datei geändert hat. Gemessen wird am ganzen
+# Repo, nicht am Paket: in einem aktiven Monorepo bricht sonst der Workspace,
+# nur weil ein Paket ruht.
+stale_dev_dirs() {
+  [[ -d "$DEV_ROOT" ]] || return 0
+  local d p root
+  /usr/bin/find "$DEV_ROOT" -name .git -prune -o -type d \( -name node_modules -o -name target \) \
+    -prune -print 2>/dev/null | while read -r d; do
+    p="$(dirname "$d")"
+    if [[ "$(basename "$d")" == target && ! -f "$p/Cargo.toml" ]]; then continue; fi
+    root="$(project_root "$p")"
+    if [[ -z "$(/usr/bin/find "$root" \( -name node_modules -o -name target -o -name .git \) -prune \
+          -o -type f -mtime "-$STALE_DAYS" -print -quit 2>/dev/null)" ]]; then
+      echo "$d"
+    fi
+  done
+}
+
+first_executable() {
+  local b
+  for b in "$@"; do
+    if [[ -x "$b" ]]; then echo "$b"; return 0; fi
+  done
+  return 1
+}
+
+# Nur ein schon laufendes OrbStack: ein docker-Aufruf gegen ein gestopptes
+# würde die VM hochfahren. `orbctl status` fragt nur ab, startet nichts.
+docker_ready() {
+  local orbctl
+  orbctl="$(first_executable "${ORBCTL_BINS[@]}")" || return 1
+  [[ "$("$orbctl" status 2>/dev/null)" == Running && -S "$DOCKER_SOCK" ]]
+}
+
+# Ein prune-Befehl, z. B. `docker_prune image prune -a`. Scheitert er, läuft
+# der Rest der Aufräumrunde weiter.
+docker_prune() {
+  local bin out
+  bin="$(first_executable "${DOCKER_BINS[@]}")" || return 0
+  docker_ready || { log "  übersprungen: docker $1 $2 (OrbStack läuft nicht)"; return 0; }
+  if out="$("$bin" -H "unix://$DOCKER_SOCK" "$@" -f 2>&1 | tail -n 1)"; then
+    log "  docker $1 $2: ${out}"
+  else
+    log "  übersprungen: docker $1 $2 (${out})"
+  fi
+}
+
+# Löscht Pakete aus dem Store, auf die kein Projekt mehr verweist. pnpm legt
+# node_modules als Hardlinks in den Store an — erst dieser Schritt gibt den
+# Platz gelöschter node_modules wirklich frei.
+pnpm_prune() {
+  local bin out
+  bin="$(first_executable "${PNPM_BINS[@]}")" || return 0
+  if out="$(cd "$HOME" && "$bin" store prune 2>&1 | tail -n 1)"; then
+    log "  pnpm store prune: ${out}"
+  else
+    log "  übersprungen: pnpm store prune (${out})"
+  fi
+}
+
+remove_dirs() {
+  local p size
   while read -r p; do
     [[ -n "$p" && -d "$p" ]] || continue
     size="$(du -sh "$p" 2>/dev/null | cut -f1)"
@@ -104,8 +201,34 @@ cleanup() {
     else
       log "  teilweise (Build läuft): $size  $p"
     fi
-  done < <(candidates)
-  local after
+  done
+}
+
+below_threshold() { [[ "$(free_gb)" -lt "$THRESHOLD_GB" ]]; }
+
+# Stufe 2 und 3 höchstens einmal pro Stunde, sonst prunt check jede Minute.
+deep_due() {
+  [[ ! -f "$DEEP_STAMP" || -n "$(/usr/bin/find "$DEEP_STAMP" -mmin +60 2>/dev/null)" ]]
+}
+
+# $1 = "force": alle Stufen, unabhängig von Schwelle und Pause.
+cleanup() {
+  local force="${1:-}" before after
+  before="$(free_gb)"
+  log "frei: ${before} GB — räume auf"
+  remove_dirs < <(candidates)
+  if [[ "$force" == force ]] || { below_threshold && deep_due; }; then
+    touch "$DEEP_STAMP"
+    log "  Stufe 2: Docker-Build-Cache, unberührte Projekte, pnpm-Store"
+    docker_prune builder prune -a
+    remove_dirs < <(stale_dev_dirs)
+    pnpm_prune
+    if [[ "$force" == force ]] || below_threshold; then
+      log "  Stufe 3: gestoppte Container, ungenutzte Images"
+      docker_prune container prune
+      docker_prune image prune -a --filter until=24h
+    fi
+  fi
   after="$(free_gb)"
   log "danach frei: ${after} GB"
   /usr/bin/osascript -e "display notification \"${before} → ${after} GB frei\" with title \"diskwatch hat aufgeräumt\"" 2>/dev/null || true
@@ -117,12 +240,27 @@ do_check() {
   if [[ "$f" -lt "$THRESHOLD_GB" ]]; then cleanup; fi
 }
 
-do_list() {
+list_dirs() {
   local p
   while read -r p; do
     [[ -n "$p" && -d "$p" ]] || continue
     du -sh "$p" 2>/dev/null
-  done < <(candidates) | sort -h
+  done | sort -h
+}
+
+do_list() {
+  local bin
+  printf 'Stufe 1 — cargo-Targets:\n'
+  list_dirs < <(candidates)
+  # du zählt pnpm-Hardlinks voll mit; frei wird der Platz erst mit store prune.
+  printf '\nStufe 2 — Build-Ordner in ~/dev, Repo seit %s Tagen unverändert:\n' "$STALE_DAYS"
+  list_dirs < <(stale_dev_dirs)
+  printf '\nDocker (Stufe 2: Build-Cache; Stufe 3: Container, Images > 24 h):\n'
+  if bin="$(first_executable "${DOCKER_BINS[@]}")" && docker_ready; then
+    "$bin" -H "unix://$DOCKER_SOCK" system df 2>/dev/null || true
+  else
+    printf '  OrbStack läuft nicht — wird übersprungen\n'
+  fi
 }
 
 do_install() {
@@ -191,6 +329,7 @@ do_status() {
 case "${1:-}" in
   check)       do_check ;;
   now)         cleanup ;;
+  deep)        cleanup force ;;
   list)        do_list ;;
   install)     do_install ;;
   uninstall)   do_uninstall ;;

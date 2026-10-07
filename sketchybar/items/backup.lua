@@ -51,7 +51,7 @@ local OFF_CRIT_DAYS = 30
 local UPDATE_FREQ = 300
 local UPDATE_FREQ_RUNNING = 15
 
--- Popup-Raster wie in irrlicht.lua: die Bar-Defaults (13pt, 28px) erzeugen in
+-- Kompaktes Popup-Raster: die Bar-Defaults (13pt, 28px) erzeugen in
 -- einer Liste aus mehreren Zeilen viel Leerraum.
 local ROW_FONT = 11.0
 local ROW_HEIGHT = 20
@@ -79,7 +79,7 @@ local PROBE = table.concat({
 }, " ")
 
 -- Alter grob, aber in ganzen Sätzen: „vor 6 Tagen" liest sich schneller als
--- „6d 3h". Vorbild ist human_eta in irrlicht.lua.
+-- „6d 3h".
 local function human_age(seconds)
   local function unit(n, one, many)
     return n .. " " .. (n == 1 and one or many)

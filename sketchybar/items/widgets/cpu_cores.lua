@@ -54,7 +54,7 @@ local function color_for(load)
 end
 
 -- Popup: die fünf Prozesse mit der höchsten CPU-Last. Kompaktes Raster wie in
--- irrlicht.lua, sonst erbt jede Zeile die Bar-Höhe von 40 Punkt.
+-- items/weather.lua, sonst erbt jede Zeile die Bar-Höhe von 40 Punkt.
 local ROW_FONT = 11.0
 local ROW_HEIGHT = 20
 local ROW_PAD = 7

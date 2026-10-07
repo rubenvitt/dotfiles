@@ -17,7 +17,7 @@ local settings = require("settings")
 
 local ROW_FONT = 11.0
 -- Zeilenhöhe kommt von popup.height am Eltern-Item; background.height allein
--- ließe jede Zeile die Bar-Höhe von 40 Punkt erben. Siehe items/irrlicht.lua.
+-- ließe jede Zeile die Bar-Höhe von 40 Punkt erben. Siehe items/weather.lua.
 local ROW_HEIGHT = 20
 local ROW_PAD = 7
 local NAME_WIDTH = 160

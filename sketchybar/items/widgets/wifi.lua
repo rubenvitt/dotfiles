@@ -105,6 +105,21 @@ local ssid = sbar.add("item", "widgets.wifi.ssid", {
   }
 })
 
+local power = sbar.add("item", "widgets.wifi.power", {
+  position = "popup." .. wifi_bracket.name,
+  icon = {
+    align = "left",
+    string = "Wi-Fi:",
+    width = popup_width / 2,
+  },
+  label = {
+    string = icons.switch.off,
+    color = colors.grey,
+    width = popup_width / 2,
+    align = "right",
+  }
+})
+
 local hostname = sbar.add("item", "widgets.wifi.hostname", {
   position = "popup." .. wifi_bracket.name,
   icon = {
@@ -203,7 +218,32 @@ local function update_ssid()
   end)
 end
 
+local wifi_on = false
+
+local function update_power()
+  sbar.exec("networksetup -getairportpower en0", function(result)
+    wifi_on = result:match(": On") ~= nil
+    power:set({
+      label = {
+        string = wifi_on and icons.switch.on or icons.switch.off,
+        color = wifi_on and colors.green or colors.grey,
+      },
+    })
+  end)
+end
+
+-- setairportpower kehrt zurück, bevor das Interface umgeschaltet ist; der
+-- Rest (Bar-Icon, SSID) zieht über wifi_change nach.
+power:subscribe("mouse.clicked", function()
+  local target = wifi_on and "off" or "on"
+  sbar.exec("networksetup -setairportpower en0 " .. target, function()
+    update_power()
+    sbar.delay(1, update_power)
+  end)
+end)
+
 wifi:subscribe({"wifi_change", "system_woke"}, function(env)
+  update_power()
   sbar.exec("ipconfig getifaddr en0", function(ip)
     local connected = not (ip == "")
     wifi:set({
@@ -226,6 +266,7 @@ local function toggle_details()
   local should_draw = wifi_bracket:query().popup.drawing == "off"
   if should_draw then
     wifi_bracket:set({ popup = { drawing = true }})
+    update_power()
     sbar.exec("networksetup -getcomputername", function(result)
       hostname:set({ label = result })
     end)

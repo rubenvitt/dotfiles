@@ -12,8 +12,7 @@ local settings = require("settings")
 -- Wie die Daten geholt und gecacht werden, steht in helpers/weather_probe.py;
 -- dort ist auch begruendet, warum der Standort deutlich laenger gilt als das
 -- Wetter. Faellt das Netz aus, liefert der Helfer den letzten bekannten Stand
--- samt Alter; die Anzeige verliert dann ihre Farbe und nennt das Alter --
--- nach demselben Muster wie die gealterten Limits in items/irrlicht.lua.
+-- samt Alter; die Anzeige verliert dann ihre Farbe und nennt das Alter.
 --
 -- Amtliche Warnungen kommen aus einer zweiten Quelle, helpers/warnings_probe.py:
 -- Wetterwarnungen gemeindegenau vom DWD, Bevoelkerungsschutz kreisweit von
@@ -61,7 +60,7 @@ local BAR_LABEL_LEVEL = 4
 -- Grenze soll die sein, die im Helfer begruendet steht.
 local WARN_ROWS = 5
 
--- Popup-Raster wie in items/irrlicht.lua: die Vorgaben aus default.lua (14/13pt,
+-- Kompaktes Popup-Raster: die Vorgaben aus default.lua (14/13pt,
 -- 28px Zeilen) sind fuer einzelne Items in der Leiste gedacht und erzeugen in
 -- einer Liste vor allem Leerraum.
 local ROW_FONT = 11.0
@@ -149,7 +148,7 @@ local function daylight_at(hour, sunrise, sunset)
   return middle >= minutes(sunrise) and middle < minutes(sunset)
 end
 
--- Alter knapp halten, wie in items/irrlicht.lua: eine Einheit genuegt.
+-- Alter knapp halten: eine Einheit genuegt.
 local function human_age(seconds)
   if seconds >= 86400 then return math.floor(seconds / 86400) .. "d" end
   if seconds >= 3600 then return math.floor(seconds / 3600) .. "h" end

@@ -28,12 +28,12 @@ local settings = require("settings")
 local PROBE = "/usr/bin/python3 $CONFIG_DIR/helpers/clickup_probe.py"
 local MAX_ROWS = 8
 
--- Wie in irrlicht.lua: die Vorgaben der Bar (13pt, 40 Punkt Zeilenhoehe)
+-- Wie in items/weather.lua: die Vorgaben der Bar (13pt, 40 Punkt Zeilenhoehe)
 -- erzeugen in einer Liste vor allem Leerraum.
 local ROW_FONT = 11.0
 local ROW_HEIGHT = 20
 local ROW_PAD = 7
--- Zwei feste Spalten je Zeile, wie bei den Limit-Zeilen in irrlicht.lua:
+-- Zwei feste Spalten je Zeile:
 -- nur so stehen die Faelligkeiten untereinander, obwohl die Titel
 -- unterschiedlich lang sind. Die Breite passt zu den 34 Zeichen, auf die
 -- der Helfer kuerzt.
@@ -50,7 +50,7 @@ local UPDATE_FREQ = 900
 -- now  = heute faellig, Uhrzeit verstrichen
 -- today = heute faellig
 -- late  = Rueckstand aus frueheren Tagen; grau wie die gealterten Werte in
---         irrlicht.lua, weil eine Ampelfarbe hier nur abstumpfen wuerde
+--         items/weather.lua, weil eine Ampelfarbe hier nur abstumpfen wuerde
 local STATE_COLOR = {
   now = colors.red,
   today = colors.yellow,

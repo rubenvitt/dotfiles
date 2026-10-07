@@ -37,6 +37,15 @@ static inline mach_port_t mach_get_bs_port() {
     return 0;
   }
 
+  mach_port_t port;
+
+  // mbar registriert sich als dev.rubeen.mbar, auch wenn es über den
+  // sketchybar-Symlink läuft (dann ist BAR_NAME=sketchybar). Erst dort
+  // suchen, sonst wie bisher bei SketchyBar.
+  if (bootstrap_look_up(bs_port, "dev.rubeen.mbar", &port) == KERN_SUCCESS) {
+    return port;
+  }
+
   char* name = getenv("BAR_NAME");
   if (!name) name = "sketchybar";
   uint32_t lookup_len = 16 + strlen(name);
@@ -44,7 +53,6 @@ static inline mach_port_t mach_get_bs_port() {
   char buffer[lookup_len];
   snprintf(buffer, lookup_len, "git.felix.%s", name);
 
-  mach_port_t port;
   if (bootstrap_look_up(bs_port, buffer, &port) != KERN_SUCCESS) return 0;
   return port;
 }

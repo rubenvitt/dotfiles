@@ -88,10 +88,13 @@ local function animate_detail(detail)
 end
 
 media_cover:subscribe("media_change", function(env)
-  if whitelist[env.INFO.app] then
-    local drawing = (env.INFO.state == "playing")
-    media_artist:set({ drawing = drawing, label = env.INFO.artist, })
-    media_title:set({ drawing = drawing, label = env.INFO.title, })
+  -- SbarLua dekodiert INFO in env.INFO, mbar legt die Tabelle in env.info ab
+  -- und lässt env.INFO als Rohtext stehen.
+  local info = env.info or env.INFO
+  if whitelist[info.app] then
+    local drawing = (info.state == "playing")
+    media_artist:set({ drawing = drawing, label = info.artist, })
+    media_title:set({ drawing = drawing, label = info.title, })
     media_cover:set({ drawing = drawing })
 
     if drawing then

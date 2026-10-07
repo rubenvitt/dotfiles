@@ -32,7 +32,20 @@ if efficiency_cores >= cpu_count then efficiency_cores = 0 end
 -- externer Monitor (>= 2560), unterwegs nur das MBP-Panel (2056 auf dem 16").
 -- Daraus leitet settings.lua den Kompakt-Modus ab, damit die rechte Seite
 -- der Bar nicht in die Notch laeuft.
+-- Unter mbar läuft die Config im Daemon selbst: ein io.popen auf den eigenen
+-- Client bricht dort sofort ab, die Abfrage geht direkt über mbar.query.
+local has_mbar, mbar = pcall(require, "mbar")
+
 local function display_width()
+  if has_mbar then
+    local widest
+    for _, display in ipairs(mbar.query("displays") or {}) do
+      local w = display.frame and tonumber(display.frame.w)
+      if w and (not widest or w > widest) then widest = w end
+    end
+    return widest
+  end
+
   local handle = io.popen("sketchybar --query displays 2>/dev/null")
   if not handle then return nil end
   local out = handle:read("*a")

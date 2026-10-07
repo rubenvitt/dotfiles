@@ -29,6 +29,10 @@ local MIN_HEIGHT = 2
 local HEIGHT_STEP = 2
 
 sbar.exec("killall cpu_cores >/dev/null; $CONFIG_DIR/helpers/event_providers/cpu_cores/bin/cpu_cores cpu_cores_update 2.0")
+-- Das Event selbst anlegen, bevor ein Item es abonniert: der Helfer meldet es
+-- erst nach seinem Start an, und unter mbar geht die ganze Config vorher in
+-- einem Rutsch raus ("Event not found", das Abo fehlt dann still).
+sbar.add("event", "cpu_cores_update")
 
 -- Der Balken wächst von unten: die Unterkante bleibt fix, wenn das y_offset um
 -- die halbe fehlende Höhe mitwandert.

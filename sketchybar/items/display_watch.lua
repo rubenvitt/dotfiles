@@ -17,6 +17,8 @@ local sbar_tool = os.getenv("HOME") .. "/.dotfiles/r-tools/sbar"
 
 local check = table.concat({
   "compact=$(sketchybar --query displays | jq -r '([.[].frame.w] | max) < 2500')",
+  -- Leere Antwort (Bar gerade mitten im Reload) ist kein Moduswechsel.
+  '[ -z "$compact" ] && exit 0',
   '[ "$compact" = "' .. compact_now .. '" ] && exit 0',
   "nohup " .. sbar_tool .. " reload >/dev/null 2>&1 &",
 }, "; ")

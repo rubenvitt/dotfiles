@@ -11,6 +11,10 @@ require("default")
 require("items")
 sbar.end_config()
 
+-- Einmal "forced" an alle Items: Kalender, WLAN-Icon und Co. füllen sich sofort
+-- statt erst beim ersten routine-Tick bzw. beim nächsten wifi_change.
+sbar.update()
+
 -- Run the event loop of the sketchybar module (without this there will be no
 -- callback functions executed in the lua module)
 sbar.event_loop()

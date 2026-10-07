@@ -17,9 +17,8 @@ start-at-login = true
 auto-reload-config = true
 
 # JankyBorders mitstarten — es erkennt eine bereits laufende Instanz selbst.
-# Sketchybar NICHT hier starten: es läuft als brew-service
-# (`brew services start felixkratz/formulae/sketchybar`) und würde sonst
-# als zweite Bar-Instanz hochkommen.
+# Die Bar (mbar) NICHT hier starten: sie läuft als LaunchAgent
+# (dev.rubeen.mbar) und würde sonst als zweite Bar-Instanz hochkommen.
 after-startup-command = ['exec-and-forget /opt/homebrew/bin/borders']
 
 # Normalisierung: verschachtelte Container automatisch aufräumen.
@@ -63,18 +62,19 @@ gaps.outer.bottom     = 8
 gaps.outer.top        = [{ monitor.'built-in' = 8 }, 48]
 gaps.outer.right      = 8
 
-# Sketchybar über den Workspace-Wechsel informieren.
+# Die Bar über den Workspace-Wechsel informieren. ~/.local/bin/sketchybar ist
+# der Symlink auf mbar; /opt/homebrew/bin/sketchybar wäre das alte SketchyBar.
 # items/spaces.lua hört auf dieses Custom-Event.
 exec-on-workspace-change = ['/bin/bash', '-c',
-    '/opt/homebrew/bin/sketchybar --trigger aerospace_workspace_change FOCUSED_WORKSPACE=$AEROSPACE_FOCUSED_WORKSPACE'
+    '$HOME/.local/bin/sketchybar --trigger aerospace_workspace_change FOCUSED_WORKSPACE=$AEROSPACE_FOCUSED_WORKSPACE'
 ]
 
-# Sketchybar über den Wechsel des Binding-Modus informieren.
+# Die Bar über den Wechsel des Binding-Modus informieren.
 # items/aerospace_mode.lua hört auf dieses Custom-Event.
 # AeroSpace stellt im Callback keine Variable mit dem neuen Modus bereit
 # (per env-Dump geprüft), deshalb die Abfrage — zum Callback-Zeitpunkt ist
 # der Wechsel bereits übernommen.
-on-mode-changed = ['exec-and-forget /opt/homebrew/bin/sketchybar --trigger aerospace_mode_change MODE=$(/opt/homebrew/bin/aerospace list-modes --current)']
+on-mode-changed = ['exec-and-forget $HOME/.local/bin/sketchybar --trigger aerospace_mode_change MODE=$(/opt/homebrew/bin/aerospace list-modes --current)']
 
 # Fenster, die nicht gekachelt werden sollen.
 # Bedingungen in der test-Syntax (`man aerospace-test`); die alte

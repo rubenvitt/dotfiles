@@ -1,40 +1,39 @@
 #!/usr/bin/env bash
-# sbar - Sketchybar neu laden und pruefen, dass die Config wirklich durchlief
+# sbar - Bar (mbar) neu laden und prüfen, dass die Config wirklich durchlief
 set -euo pipefail
 
-# Warum es dieses Skript gibt: `sketchybar --reload` sagt nie, ob es geklappt
-# hat. Bleibt der Lua-Config-Prozess irgendwo haengen, laeuft sketchybar
-# munter weiter — nur eben mit den Werkseinstellungen (Hoehe 25, keine Items)
-# und ohne eine einzige Fehlermeldung im Log. Wer dann wartet, wartet ewig.
-#
-# "Gesund" heisst hier zweierlei, beides muss stimmen:
-#   * `--query bar` liefert Items (die Config wurde committet), und
-#   * der Kindprozess `lua .../sketchybarrc` lebt (Callbacks funktionieren).
-# Ohne den zweiten Teil steht die Bar zwar, aber kein Klick und kein Popup tut
-# noch etwas.
+# Warum es dieses Skript gibt: `--reload` sagt nie, ob die Config durchlief.
+# Bricht sie ab, läuft die Bar mit den Werkseinstellungen weiter (Höhe 25,
+# keine Items) und nur das Log verrät es. Seit dem Umstieg von SketchyBar auf
+# mbar läuft die Lua-Config im Daemon selbst; "gesund" heißt deshalb nur noch:
+# `--query bar` liefert Items. Einen eigenen Lua-Prozess, der hängen könnte,
+# gibt es nicht mehr.
 
+LABEL="dev.rubeen.mbar"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+SERVICE="gui/$(id -u)/$LABEL"
+LOG="$HOME/Library/Logs/mbar.log"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sketchybar"
-PLIST="$HOME/Library/LaunchAgents/homebrew.mxcl.sketchybar.plist"
-SERVICE="gui/$(id -u)/homebrew.mxcl.sketchybar"
 
-# Auf einer ruhigen Maschine ist die Config in unter einer Sekunde drin. Unter
-# Last dauert sie ein Vielfaches — gemessen 40 s bei load 28 — deshalb so
-# grosszuegig: ein zu frueher zweiter Anlauf macht es nur schlimmer.
+# Die Config ist normalerweise in unter einer Sekunde drin. Unter hoher Last
+# dauerte sie bei SketchyBar ein Vielfaches (gemessen 40 s bei load 28), daher
+# bleibt der Puffer großzügig.
 WAIT_SECONDS=45
 ATTEMPTS=2
 
 usage() {
   cat <<'EOF'
-sbar - Sketchybar neu laden und pruefen, dass die Config wirklich durchlief
+sbar - Bar (mbar) neu laden und prüfen, dass die Config wirklich durchlief
 
   sbar                Config neu laden, verifizieren, im Fehlerfall nachlegen
   sbar reload         dasselbe, ausgeschrieben
-  sbar restart        echter Prozess-Neustart (stop, Pause, start) + Pruefung
-  sbar status         Was laeuft gerade: Items, Config-Prozess, Event-Provider
+  sbar restart        echter Prozess-Neustart über launchd + Prüfung
+  sbar status         Was läuft gerade: Items, Event-Provider, Warnungen
   sbar -h | --help    diese Hilfe
 
-Ein Prozess-Neustart ist nur noetig, wenn eine per `launchctl setenv` gesetzte
-Variable ankommen soll — `--reload` liest die launchd-Umgebung nicht neu.
+Ein Prozess-Neustart ist nur nötig, wenn eine per `launchctl setenv` gesetzte
+Variable ankommen soll oder ein neues mbar-Binary installiert wurde —
+`--reload` liest weder die launchd-Umgebung noch das Binary neu.
 EOF
 }
 
@@ -42,8 +41,9 @@ die() { printf 'sbar: %s\n' "$1" >&2; exit 1; }
 
 # --- Zustand abfragen --------------------------------------------------------
 
-# Steckt sketchybar selbst fest, blockiert --query ohne Timeout unbegrenzt.
-query_bar() { timeout 5 sketchybar --query bar 2>/dev/null || true; }
+# Der mbar-Client wartet selbst höchstens 5 s; das äußere timeout fängt nur
+# den Fall ab, dass schon der Verbindungsaufbau hängt.
+query_bar() { timeout 7 mbar --query bar 2>/dev/null || true; }
 
 item_count() {
   local out
@@ -52,14 +52,8 @@ item_count() {
   printf '%s' "$out" | jq -r '.items | length' 2>/dev/null || echo -1
 }
 
-# Der Config-Prozess ist ein Kind von sketchybar und heisst nach dem Shebang
-# schlicht "lua"; das Argument macht ihn eindeutig.
-config_pids() { pgrep -f "lua .*sketchybarrc" 2>/dev/null || true; }
-
 healthy() {
-  local n
-  n="$(item_count)"
-  [[ "$n" -gt 0 ]] && [[ -n "$(config_pids)" ]]
+  [[ "$(item_count)" -gt 0 ]]
 }
 
 wait_healthy() {
@@ -71,14 +65,11 @@ wait_healthy() {
   return 1
 }
 
-# Ein festhaengender Config-Prozess ueberlebt --reload nicht zuverlaessig und
-# wuerde den naechsten Versuch mit "Item already exists" zumuellen.
-kill_stale_config() {
-  local pid
-  for pid in $(config_pids); do
-    kill "$pid" 2>/dev/null || true
-  done
-  sleep 0.3
+# Warnungen und Fehler aus dem Log: ein Lua-Fehler in einem Item lässt die
+# übrigen Items stehen, die Bar sieht also trotzdem gesund aus.
+recent_problems() {
+  [[ -f "$LOG" ]] || return 0
+  tail -n 200 "$LOG" | grep -E ' (WARN|ERROR) |\[!\]' | tail -n "${1:-5}" || true
 }
 
 # --- Aktionen ----------------------------------------------------------------
@@ -86,16 +77,12 @@ kill_stale_config() {
 do_reload() {
   local attempt
   for ((attempt = 1; attempt <= ATTEMPTS; attempt++)); do
-    # Nur aufraeumen, wenn die Bar ohnehin schon kaputt ist. Steht sie, macht
-    # --reload den Wechsel selbst — und ein Kill waere nur ein Fenster mehr,
-    # in dem gar nichts da ist.
-    healthy || kill_stale_config
-    sketchybar --reload
+    mbar --reload
     if wait_healthy; then
       printf 'sbar: geladen (%s Items, Versuch %d)\n' "$(item_count)" "$attempt"
       return 0
     fi
-    printf 'sbar: Versuch %d haengt (>%ds), neuer Anlauf ...\n' "$attempt" "$WAIT_SECONDS" >&2
+    printf 'sbar: Versuch %d hängt (>%ds), neuer Anlauf ...\n' "$attempt" "$WAIT_SECONDS" >&2
   done
 
   printf 'sbar: nach %d Versuchen keine Config in der Bar.\n' "$ATTEMPTS" >&2
@@ -104,44 +91,40 @@ do_reload() {
 }
 
 do_restart() {
-  pgrep -x sketchybar >/dev/null || die "sketchybar laeuft nicht — brew services start sketchybar"
-  [[ -f "$PLIST" ]] || die "kein launchd-Plist unter $PLIST"
+  [[ -f "$PLIST" ]] || die "kein launchd-Plist unter $PLIST — make install-agent im mbar-Repo"
 
-  launchctl bootout "$SERVICE" 2>/dev/null || true
-  # Die Pause ist der Punkt: startet der neue Prozess, waehrend der alte noch
-  # abgeraeumt wird, kommt die Bar deutlich haeufiger gar nicht hoch.
-  sleep 3
-  launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null || true
+  if launchctl print "$SERVICE" >/dev/null 2>&1; then
+    launchctl kickstart -k "$SERVICE"
+  else
+    launchctl bootstrap "gui/$(id -u)" "$PLIST"
+  fi
 
   if wait_healthy; then
     printf 'sbar: neu gestartet (%s Items)\n' "$(item_count)"
     return 0
   fi
-  printf 'sbar: Prozess laeuft, aber die Config kam nicht durch — versuche: sbar reload.\n' >&2
+  printf 'sbar: Prozess läuft, aber die Config kam nicht durch — versuche: sbar reload.\n' >&2
   do_status >&2
   return 1
 }
 
 do_status() {
-  local n pids
-  n="$(item_count)"
-  pids="$(config_pids | tr '\n' ' ')"
+  local n
 
-  printf 'sketchybar   '
-  if pgrep -x sketchybar >/dev/null; then
-    printf 'laeuft (PID %s)\n' "$(pgrep -x sketchybar | head -1)"
+  printf 'mbar         '
+  if pgrep -x mbar >/dev/null; then
+    printf 'läuft (PID %s)\n' "$(pgrep -x mbar | head -1)"
   else
-    printf 'laeuft nicht\n'
+    printf 'läuft nicht — sbar restart\n'
   fi
 
+  n="$(item_count)"
   printf 'Items        '
   case "$n" in
     -1) printf 'keine Antwort (--query blockiert)\n' ;;
      0) printf '0 — Werkseinstellungen, Config ist nicht durchgelaufen\n' ;;
      *) printf '%s\n' "$n" ;;
   esac
-
-  printf 'Config       %s\n' "${pids:-kein lua-Prozess — Config haengt oder ist gestorben}"
 
   printf 'Provider     '
   local providers
@@ -150,18 +133,23 @@ do_status() {
 
   printf 'Config-Dir   %s\n' "$CONFIG_DIR"
 
-  # Steht hier, weil es die haeufigste Erklaerung fuer einen zaehen Reload ist:
-  # dieselbe Config braucht bei load 6 rund 0,3 s und bei load 28 ueber 40 s.
   local load
   load="$(sysctl -n vm.loadavg | awk '{print $2}')"
   printf 'Systemlast   %s' "$load"
-  awk -v l="$load" 'BEGIN { if (l+0 > 12) printf "  (hoch — ein zaeher Reload liegt eher daran als an der Config)" }'
+  awk -v l="$load" 'BEGIN { if (l+0 > 12) printf "  (hoch — ein zäher Reload liegt eher daran als an der Config)" }'
   printf '\n'
+
+  local problems
+  problems="$(recent_problems 5)"
+  if [[ -n "$problems" ]]; then
+    printf 'Log          letzte Warnungen aus %s:\n' "$LOG"
+    printf '%s\n' "$problems" | sed 's/^/             /'
+  fi
 }
 
 # --- Einstieg ----------------------------------------------------------------
 
-command -v sketchybar >/dev/null || die "sketchybar nicht im PATH"
+command -v mbar >/dev/null || die "mbar nicht im PATH (~/.local/bin)"
 command -v jq >/dev/null || die "jq nicht im PATH (brew install jq)"
 command -v timeout >/dev/null || die "timeout nicht im PATH (brew install coreutils)"
 

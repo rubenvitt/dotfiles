@@ -60,13 +60,13 @@
 # Vorgaben weiter oben (etwa commit.gpgsign) tatsächlich überschreiben.
 [includeIf "gitdir:~/dev/work/"]
 	path = ~/.config/git/work.gitconfig
+[includeIf "gitdir:~/wnotes/"]
+	path = ~/.config/git/work.gitconfig
 [includeIf "gitdir:~/dev/work/innoq/"]
 	path = ~/.config/git/innoq.gitconfig
 [includeIf "gitdir:~/.dotfiles/"]
         path = ~/.config/git/personal.gitconfig
 [includeIf "gitdir:~/dev/personal/"]
-	path = ~/.config/git/personal.gitconfig
-[includeIf "gitdir:~/wnotes/shared-vaults/"]
 	path = ~/.config/git/personal.gitconfig
 [includeIf "gitdir:~/dev/edu/"]
         path = ~/.config/git/personal.gitconfig

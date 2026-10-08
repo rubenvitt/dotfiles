@@ -15,7 +15,7 @@ brew install sketchybar borders
 # dieser Schritt läuft nicht unbeaufsichtigt durch.
 brew install --cask sf-symbols font-sf-mono font-sf-pro
 
-curl -L https://github.com/kvndrsslr/sketchybar-app-font/releases/download/v2.0.36/sketchybar-app-font.ttf \
+curl -L https://github.com/kvndrsslr/sketchybar-app-font/releases/download/v2.0.90/sketchybar-app-font.ttf \
   -o "$HOME/Library/Fonts/sketchybar-app-font.ttf"
 
 # SbarLua — die Lua-Bindings, die sketchybarrc erwartet.

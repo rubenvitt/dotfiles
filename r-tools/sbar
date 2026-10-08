@@ -10,7 +10,6 @@ set -euo pipefail
 # gibt es nicht mehr.
 
 LABEL="dev.rubeen.mbar"
-PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 SERVICE="gui/$(id -u)/$LABEL"
 LOG="$HOME/Library/Logs/mbar.log"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sketchybar"
@@ -91,13 +90,9 @@ do_reload() {
 }
 
 do_restart() {
-  [[ -f "$PLIST" ]] || die "kein launchd-Plist unter $PLIST — make install-agent im mbar-Repo"
-
-  if launchctl print "$SERVICE" >/dev/null 2>&1; then
-    launchctl kickstart -k "$SERVICE"
-  else
-    launchctl bootstrap "gui/$(id -u)" "$PLIST"
-  fi
+  launchctl print "$SERVICE" >/dev/null 2>&1 \
+    || die "mbar ist nicht als Anmeldeobjekt registriert — mbar.app öffnen, Seite Setup"
+  launchctl kickstart -k "$SERVICE"
 
   if wait_healthy; then
     printf 'sbar: neu gestartet (%s Items)\n' "$(item_count)"
@@ -149,7 +144,7 @@ do_status() {
 
 # --- Einstieg ----------------------------------------------------------------
 
-command -v mbar >/dev/null || die "mbar nicht im PATH (~/.local/bin)"
+command -v mbar >/dev/null || die "mbar nicht im PATH (mbar.app → Setup → Befehle installieren)"
 command -v jq >/dev/null || die "jq nicht im PATH (brew install jq)"
 command -v timeout >/dev/null || die "timeout nicht im PATH (brew install coreutils)"
 

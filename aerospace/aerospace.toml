@@ -17,7 +17,7 @@ start-at-login = true
 auto-reload-config = true
 
 # JankyBorders mitstarten — es erkennt eine bereits laufende Instanz selbst.
-# Die Bar (mbar) NICHT hier starten: sie läuft als LaunchAgent
+# Die Bar (mbar) NICHT hier starten: sie läuft als Anmeldeobjekt von mbar.app
 # (dev.rubeen.mbar) und würde sonst als zweite Bar-Instanz hochkommen.
 after-startup-command = ['exec-and-forget /opt/homebrew/bin/borders']
 
@@ -62,11 +62,11 @@ gaps.outer.bottom     = 8
 gaps.outer.top        = [{ monitor.'built-in' = 8 }, 48]
 gaps.outer.right      = 8
 
-# Die Bar über den Workspace-Wechsel informieren. ~/.local/bin/sketchybar ist
-# der Symlink auf mbar; /opt/homebrew/bin/sketchybar wäre das alte SketchyBar.
+# Die Bar über den Workspace-Wechsel informieren. AeroSpace startet Befehle ohne
+# Login-Shell und liest /etc/paths.d nicht, deshalb der volle Pfad in mbar.app.
 # items/spaces.lua hört auf dieses Custom-Event.
 exec-on-workspace-change = ['/bin/bash', '-c',
-    '$HOME/.local/bin/sketchybar --trigger aerospace_workspace_change FOCUSED_WORKSPACE=$AEROSPACE_FOCUSED_WORKSPACE'
+    '/Applications/mbar.app/Contents/Resources/bin/sketchybar --trigger aerospace_workspace_change FOCUSED_WORKSPACE=$AEROSPACE_FOCUSED_WORKSPACE'
 ]
 
 # Die Bar über den Wechsel des Binding-Modus informieren.
@@ -74,7 +74,7 @@ exec-on-workspace-change = ['/bin/bash', '-c',
 # AeroSpace stellt im Callback keine Variable mit dem neuen Modus bereit
 # (per env-Dump geprüft), deshalb die Abfrage — zum Callback-Zeitpunkt ist
 # der Wechsel bereits übernommen.
-on-mode-changed = ['exec-and-forget $HOME/.local/bin/sketchybar --trigger aerospace_mode_change MODE=$(/opt/homebrew/bin/aerospace list-modes --current)']
+on-mode-changed = ['exec-and-forget /Applications/mbar.app/Contents/Resources/bin/sketchybar --trigger aerospace_mode_change MODE=$(/opt/homebrew/bin/aerospace list-modes --current)']
 
 # Fenster, die nicht gekachelt werden sollen.
 # Bedingungen in der test-Syntax (`man aerospace-test`); die alte

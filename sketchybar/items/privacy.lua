@@ -6,7 +6,7 @@ local icons = require("icons")
 -- Privacy-Punkt (Mikrofon, Kamera, Bildschirm, Systemaudio) über die Bar.
 -- bar.lua rückt die rechten Items per privacy_indicator_inset links neben den
 -- Punkt; diese Datei legt eine Kapsel um ihn, die zeigt, wer ihn auslöst:
--- Sensor-Symbol in Apples Farbe plus App-Icons. Neue Apps klappen kurz ihren
+-- Sensor-Symbole in Apples Farben plus App-Icons. Neue Apps klappen kurz ihren
 -- Namen aus, Hover zeigt alle Namen, Klick listet jede App mit ihrem Sensor.
 --
 -- Muss vor items.calendar geladen werden: rechte Items liegen in
@@ -24,8 +24,8 @@ local KNOWN = {
   ["com.rogueamoeba.arkaudiod"] = { name = "SoundSource", icon = "com.rogueamoeba.soundsource" },
 }
 
--- Reihenfolge = Platz von rechts (am Punkt) nach links und Vorrang für die
--- Kapselfarbe. Die Farben folgen Apples Punkt, angepasst an colors.lua.
+-- Reihenfolge der Symbole in der Bar und Vorrang für die Kapselfarbe. Die
+-- Farben folgen Apples Punkt, angepasst an colors.lua.
 local KINDS = {
   { key = "camera",   title = "Kamera",      color = colors.green,
     pane = "Privacy_Camera" },
@@ -39,7 +39,7 @@ local KINDS = {
     pane = "Privacy_LocationServices" },
 }
 
-local MAX_APPS = 3            -- App-Icons je Sensor in der Bar
+local MAX_APPS = 3            -- App-Icons in der Bar
 local POPUP_ROWS = 8
 local POPUP_WIDTH = 300
 local CAP = 26                -- Kapselhöhe; das rechte Ende ist ein Kreis um den Punkt
@@ -79,30 +79,52 @@ local cap = sbar.add("item", "privacy", {
 })
 
 local pill_items = { cap }
-local groups = {}
 
-for _, kind in ipairs(KINDS) do
-  local group = { kind = kind, apps = {} }
-  -- Rechts angeordnet, also in umgekehrter Reihenfolge anlegen: in der Bar
-  -- steht dann Symbol, App 1, App 2, App 3.
-  for i = MAX_APPS, 1, -1 do
-    group.apps[i] = sbar.add("item", "privacy." .. kind.key .. ".app" .. i, {
-      position = "right",
-      drawing = false,
-      width = APP_WIDTH,
-      padding_left = 0,
-      padding_right = 0,
-      icon = { drawing = false },
-      label = { drawing = false },
-      background = {
-        color = colors.transparent,
-        border_width = 0,
-        image = { scale = 0.5, border_width = 0, corner_radius = 0 },   -- app.* liefert 32 pt
-      },
-    })
-    pill_items[#pill_items + 1] = group.apps[i]
-  end
-  group.glyph = sbar.add("item", "privacy." .. kind.key, {
+-- Je App ein Icon, auch wenn sie mehrere Sensoren nutzt. Rechts angeordnet,
+-- also rückwärts anlegen: in der Bar stehen sie dann in Reihenfolge.
+local apps = {}
+for i = MAX_APPS, 1, -1 do
+  apps[i] = sbar.add("item", "privacy.app" .. i, {
+    position = "right",
+    drawing = false,
+    width = APP_WIDTH,
+    padding_left = 0,
+    padding_right = 0,
+    icon = { drawing = false },
+    label = { drawing = false },
+    background = {
+      color = colors.transparent,
+      border_width = 0,
+      image = { scale = 0.5, border_width = 0, corner_radius = 0 },   -- app.* liefert 32 pt
+    },
+  })
+  pill_items[#pill_items + 1] = apps[i]
+end
+
+-- Namen links neben den Icons, nur ausgeklappt sichtbar.
+local app_names = sbar.add("item", "privacy.names", {
+  position = "right",
+  drawing = false,
+  padding_left = 0,
+  padding_right = 0,
+  icon = { drawing = false },
+  label = {
+    color = colors.white,
+    padding_left = 2,
+    padding_right = 4,
+    -- Kompakt-Modus: Die rechte Seite muss vor der Notch bleiben. Mit drei
+    -- Apps, drei Sensoren und 14 Zeichen endet sie gemessen gut 40 pt davor.
+    max_chars = settings.compact and 14 or 32,
+    font = { style = settings.font.style_map["Semibold"], size = 12.0 },
+  },
+})
+pill_items[#pill_items + 1] = app_names
+
+-- Ein Symbol je aktivem Sensor, links in der Insel, in KINDS-Reihenfolge.
+local glyphs = {}
+for i = #KINDS, 1, -1 do
+  local kind = KINDS[i]
+  glyphs[kind.key] = sbar.add("item", "privacy." .. kind.key, {
     position = "right",
     drawing = false,
     padding_left = 0,
@@ -110,21 +132,13 @@ for _, kind in ipairs(KINDS) do
     icon = {
       string = icons.privacy[kind.key],
       color = kind.color,
-      padding_left = 4,
-      padding_right = 4,
+      padding_left = 3,
+      padding_right = 3,
       font = { style = settings.font.style_map["Bold"], size = 13.0 },
     },
-    label = {
-      drawing = false,
-      color = colors.white,
-      padding_left = 0,
-      padding_right = 6,
-      max_chars = 28,
-      font = { style = settings.font.style_map["Semibold"], size = 12.0 },
-    },
+    label = { drawing = false },
   })
-  pill_items[#pill_items + 1] = group.glyph
-  groups[#groups + 1] = group
+  pill_items[#pill_items + 1] = glyphs[kind.key]
 end
 
 -- Punkt sichtbar, aber keine Zuordnung (Log-Stream fehlt oder Apple hat das
@@ -336,42 +350,51 @@ render = function()
   })
   cap:set({ drawing = true, display = display })
 
-  for _, group in ipairs(groups) do
-    local all = attribution and info[group.kind.key] or {}
-    local loud = {}
-    for _, id in ipairs(all) do
+  local loud, quiet, seen = {}, {}, {}
+  for _, kind in ipairs(KINDS) do
+    local loud_kind, quiet_kind = false, false
+    for _, id in ipairs(attribution and info[kind.key] or {}) do
       resolve(id)
-      if not QUIET[id] then loud[#loud + 1] = id end
+      if QUIET[id] then quiet_kind = true else loud_kind = true end
+      if not seen[id] then
+        seen[id] = true
+        table.insert(QUIET[id] and quiet or loud, id)
+      end
     end
+    if loud_kind and not tint then tint = kind.color end
     -- Dauerquellen zeigen sich nur beim Hovern, dann grau.
-    local ids = #loud > 0 and loud or (hovering and all or {})
-    if #ids == 0 then
-      group.glyph:set({ drawing = false })
-      for _, app in ipairs(group.apps) do set_app(app, nil) end
-    else
-      content = true
-      if #loud > 0 and not tint then tint = group.kind.color end
-      local labels, missing_icon = {}, false
-      for i, id in ipairs(ids) do
-        labels[i] = display_name(id)
-        if i <= MAX_APPS and not icon_source[id] then missing_icon = true end
-      end
-      group.glyph:set({
-        drawing = true,
-        display = display,
-        icon = { color = #loud > 0 and group.kind.color or colors.grey },
-        label = {
-          -- Ohne Icon steht der Name immer da, sonst sähe man nur das Symbol.
-          drawing = show_names or missing_icon,
-          string = table.concat(labels, ", "),
-        },
-      })
-      for i, app in ipairs(group.apps) do
-        local id = ids[i]
-        set_app(app, id and icon_source[id] or nil, display)
-      end
-    end
+    local show = loud_kind or (hovering and quiet_kind)
+    content = content or show
+    glyphs[kind.key]:set({
+      drawing = show,
+      display = display,
+      icon = { color = loud_kind and kind.color or colors.grey },
+    })
   end
+
+  local shown = {}
+  for _, id in ipairs(loud) do shown[#shown + 1] = id end
+  if hovering then
+    for _, id in ipairs(quiet) do shown[#shown + 1] = id end
+  end
+  local labels, missing_icon = {}, false
+  for i, id in ipairs(shown) do
+    labels[i] = display_name(id)
+    if i <= MAX_APPS and not icon_source[id] then missing_icon = true end
+  end
+  for i, app in ipairs(apps) do
+    local id = shown[i]
+    set_app(app, id and icon_source[id] or nil, display)
+  end
+  app_names:set({
+    -- Ohne Icon steht der Name immer da, sonst sähe man nur das Symbol.
+    drawing = #shown > 0 and (show_names or missing_icon),
+    display = display,
+    label = {
+      string = table.concat(labels, ", "),
+      color = #loud > 0 and colors.white or colors.grey,
+    },
+  })
 
   unknown:set({
     drawing = not attribution,

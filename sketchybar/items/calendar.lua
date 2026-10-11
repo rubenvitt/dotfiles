@@ -29,8 +29,8 @@ local GRID_KW_WIDTH = 24
 local GRID_KW_GAP = 14
 local GRID_ADVANCE = 8.036   -- Vorschub SF Mono 13 pt
 -- Feste Label-Breite: 20 Zeichen plus Rand für die Markierung am Sonntag.
--- Ohne sie misst mbar den Text ohne führende Leerzeichen und schneidet das
--- Ende ab.
+-- Ohne sie zählt (wie in SketchyBar) nur die Tinte als Breite: führende
+-- Leerzeichen verschieben den Text, das Ende wird abgeschnitten.
 local GRID_LABEL_WIDTH = 166
 
 local function read_mode()

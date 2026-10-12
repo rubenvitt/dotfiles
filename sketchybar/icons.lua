@@ -8,6 +8,7 @@ local icons = {
     gear = "􀍟",
     cpu = "􀫥",
     clipboard = "􀉄",
+    sms = "\u{100335}",   -- Sprechblase mit Text, für items/sms_code.lua
 
     switch = {
       on = "􁏮",
@@ -108,6 +109,7 @@ local icons = {
     gear = "",
     cpu = "",
     clipboard = "Missing Icon",
+    sms = "\u{F0369}",    -- mdi:message-text
 
     switch = {
       on = "󱨥",

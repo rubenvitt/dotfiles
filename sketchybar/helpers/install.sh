@@ -26,6 +26,10 @@ curl -L https://github.com/kvndrsslr/sketchybar-app-font/releases/download/v2.0.
 # Helper-Binaries (cpu_load, network_load, menus) bauen
 make -C "$(dirname "$0")"
 
+# Kalender-Helfer für den Termin-Countdown als LaunchAgent. Beim ersten Start
+# fragt macOS nach dem Kalenderzugriff für "next_events" — erlauben.
+make -C "$(dirname "$0")/calendar" install
+
 echo
 echo "Fertig. Start:  brew services start felixkratz/formulae/sketchybar"
 echo "Sketchybar braucht dieselbe Bedienungshilfen-Berechtigung wie AeroSpace"

@@ -53,8 +53,9 @@ func relevant(_ event: EKEvent, after: Date) -> Bool {
   !event.isAllDay
     && event.startDate >= after
     && event.status != .canceled
+    // .notSupported ist kein "frei": abonnierte Kalender melden schlicht keine
+    // Verfügbarkeit.
     && event.availability != .free
-    && event.availability != .notSupported
     && !ignoredCalendars.contains(event.calendar.title)
     && !ignoredTitles.contains(event.title ?? "")
     && !declinedByMe(event)

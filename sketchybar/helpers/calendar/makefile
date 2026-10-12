@@ -39,6 +39,9 @@ install: $(BIN)
 	  '<key>StandardErrorPath</key><string>$(LOG)</string>' \
 	  '</dict></plist>' > $(PLIST)
 	-launchctl bootout $(DOMAIN)/$(LABEL) 2>/dev/null
+# bootout kehrt zurück, bevor der Dienst weg ist; ein sofortiges bootstrap
+# scheitert dann mit "Input/output error".
+	while launchctl print $(DOMAIN)/$(LABEL) >/dev/null 2>&1; do sleep 0.2; done
 	launchctl bootstrap $(DOMAIN) $(PLIST)
 
 uninstall:

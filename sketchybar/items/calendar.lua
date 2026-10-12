@@ -5,9 +5,9 @@ local icons = require("icons")
 -- Uhr. Zwei Anzeigen in der Bar, Rechtsklick schaltet um (wird gemerkt):
 --   dtg     – taktische Datums-Zeit-Gruppe ddHHMMmmmyy, z. B. 111423okt26
 --   classic – Wochentag, Datum und Uhrzeit
--- Linksklick kopiert die angezeigte Zeit und öffnet ein Popup mit nächstem
--- Termin, Datum, Kalenderwoche, Tag im Jahr, DTG (lokal und Zulu) und dem
--- Monatskalender. Ein Klick auf eine Zeile kopiert ihren Wert.
+-- Linksklick öffnet ein Popup mit nächstem Termin, Datum, Kalenderwoche, Tag
+-- im Jahr, DTG (lokal und Zulu) und dem Monatskalender. Ein Klick auf eine
+-- Zeile kopiert ihren Wert, ein Klick auf einen Tag im Kalender sein Datum.
 --
 -- Termin-Countdown: eine Stunde vor dem nächsten Termin erscheint links in
 -- der Uhr-Insel eine kleine Pille (−42m). Ab 15 Minuten wird sie kräftiger
@@ -280,6 +280,10 @@ for i = 1, GRID_ROWS do
   grid[i] = grid_item("clock.grid." .. i)
 end
 
+-- Was render_popup gerade zeigt, für Klicks auf einen Tag.
+local grid_month = {}     -- year, month, days
+local grid_start = {}     -- je Zeile: Tag im Monat am Montag
+
 local function render_popup()
   local now = os.time()
   local t = os.date("*t", now)
@@ -304,8 +308,10 @@ local function render_popup()
   local today_row = today_index // 7 + 1
   local today_col = today_index % 7
 
+  grid_month = { year = t.year, month = t.month, days = days_in_month }
   for r = 1, GRID_ROWS do
     local start = (r - 1) * 7 - lead + 1          -- Tag im Monat am Montag
+    grid_start[r] = start
     if start > days_in_month then
       grid[r]:set({ drawing = false })
     else
@@ -405,24 +411,18 @@ end
 
 local popup_open = false
 
--- Was die Bar gerade zeigt: Icon (nur klassisch) und Label.
-local function bar_text()
-  if mode == "dtg" then return nil, dtg(os.date("*t")) end
-  local date_fmt = settings.compact and "%a %d.%m." or "%a. %d %b."
-  return os.date(date_fmt), os.date("%H:%M")
-end
-
 local function update()
-  local date, time = bar_text()
+  local t = os.date("*t")
   if mode == "dtg" then
     cal:set({
       icon = { drawing = false },
-      label = { string = time, width = "dynamic", padding_left = 8 },
+      label = { string = dtg(t), width = "dynamic", padding_left = 8 },
     })
   else
+    local date_fmt = settings.compact and "%a %d.%m." or "%a. %d %b."
     cal:set({
-      icon = { drawing = true, string = date },
-      label = { string = time, width = 49, padding_left = settings.paddings },
+      icon = { drawing = true, string = os.date(date_fmt) },
+      label = { string = os.date("%H:%M"), width = 49, padding_left = settings.paddings },
     })
   end
   render_next()
@@ -448,8 +448,6 @@ cal:subscribe("mouse.clicked", function(env)
     update()
     return
   end
-  local date, time = bar_text()
-  copy(date and (date .. " " .. time) or time)
   popup_open = not popup_open
   if popup_open then render_popup() end
   cal:set({ popup = { drawing = popup_open } })
@@ -469,6 +467,36 @@ header:subscribe("mouse.clicked", function() copy(os.date("%Y-%m-%d")) end)
 for _, row in ipairs({ week_row, day_row, dtg_row, zulu_row }) do
   row:subscribe("mouse.clicked", function(env)
     copy(sbar.query(env.NAME).label.value)
+  end)
+end
+
+-- Tag im Monatskalender: mouse.clicked kennt nur die Zeile, die Spalte
+-- ergibt sich aus der Mausposition relativ zum Item (helpers/mouse).
+local MOUSE_LOCATION = "$CONFIG_DIR/helpers/mouse/bin/mouse_location"
+
+local function grid_origin_x(name)
+  for _, rect in pairs(sbar.query(name).bounding_rects or {}) do
+    if rect.origin[1] > -9999 then return rect.origin[1] end
+  end
+end
+
+for r = 1, GRID_ROWS do
+  grid[r]:subscribe("mouse.clicked", function(env)
+    local origin = grid_origin_x(env.NAME)
+    if not origin then return end
+    sbar.exec(MOUSE_LOCATION, function(out)
+      local x = tonumber(tostring(out):match("^%s*(%S+)"))
+      if not x then return end
+      -- Tageszellen beginnen hinter KW-Spalte und Abstand, je drei Zeichen.
+      local rel = x - origin - GRID_KW_WIDTH - GRID_KW_GAP
+      local col = math.floor(rel / (3 * GRID_ADVANCE))
+      if rel < 0 or col > 6 then return end
+      local day = grid_start[r] + col
+      if day < 1 or day > grid_month.days then return end
+      copy(os.date("%Y-%m-%d", os.time({
+        year = grid_month.year, month = grid_month.month, day = day, hour = 12,
+      })))
+    end)
   end)
 end
 

@@ -25,36 +25,11 @@ function _ccp_launch --description 'intern (ccp): Claude Code in einem bestimmte
         return 1
     end
 
-    # Gleichzeitigkeits-Guard: dasselbe Config-Dir nicht doppelt öffnen — zwei Claude-
-    # Prozesse im selben Dir können beim Schreiben von .claude.json die Datei beschädigen.
-    set -l lock "$dir/.ccp.lock"
-    if test -f "$lock"
-        set -l oldpid (cat "$lock" 2>/dev/null | string trim)
-        if test -n "$oldpid"; and kill -0 $oldpid 2>/dev/null
-            # Live-Session gefunden. Nur interaktiv nachfragen; Skripte/`-p` nie blockieren.
-            if status is-interactive
-                echo "⚠️  In Profil '$profile' läuft bereits eine Session (PID $oldpid)." >&2
-                echo "   Dasselbe Profil zweimal im selben Config-Dir kann .claude.json beschädigen." >&2
-                read -l -P "   Trotzdem starten? [y/N] " ans
-                if not string match -qi 'y' -- "$ans"
-                    return 1
-                end
-            end
-        end
-    end
-
     # dev teilt alles außer dem Login mit personal: neue Einträge aus ~/.claude verlinken und
     # MCP-/Projekt-State übernehmen. Schlägt das fehl, startet dev trotzdem.
     if test "$profile" = dev; and command -q ccp
         command ccp sync dev
     end
 
-    echo $fish_pid >"$lock"
     env CLAUDE_CONFIG_DIR="$dir" claude $argv
-    set -l rc $status
-    # Lock nur entfernen, wenn er noch uns gehört (parallele Starts nicht überschreiben).
-    if test -f "$lock"; and test (cat "$lock" 2>/dev/null | string trim) = "$fish_pid"
-        rm -f "$lock"
-    end
-    return $rc
 end

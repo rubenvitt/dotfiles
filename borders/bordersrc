@@ -3,16 +3,16 @@
 # Doku: man borders
 #
 # Symlink: ~/.config/borders/bordersrc -> ~/.dotfiles/borders/bordersrc
-# Autostart: aerospace.toml → after-startup-command
+# Autostart: mbar.app führt diese Datei beim Start selbst aus
 #
 # Farben folgen dem Sketchybar-Schema (sketchybar/colors.lua):
-#   blue 0xff76cce0 (aktiv), bg2 0xff414550 (inaktiv)
+#   orange 0xfff39660 (aktiv), bg2 0xff414550 (inaktiv)
 
 options=(
     style=round
     width=6.0
     hidpi=on
-    active_color=0xff76cce0
+    active_color=0xfff39660
     inactive_color=0xff414550
 )
 

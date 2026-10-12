@@ -57,6 +57,21 @@ local icons = {
       ram = "􀫦",
       disk = "􀥾",
     },
+    -- Privacy-Insel (items/privacy.lua): ein Symbol je Sensor, den macOS'
+    -- Privacy-Punkt meldet. Codepoints per Render-Abgleich mit SF Pro ermittelt.
+    privacy = {
+      mic      = "\u{1002B1}",   -- mic.fill
+      camera   = "\u{10034A}",   -- video.fill
+      screen   = "\u{10089A}",   -- record.circle.fill
+      audio    = "\u{10066B}",   -- waveform
+      location = "\u{1002D2}",   -- location.fill
+      unknown  = "\u{10027C}",   -- hand.raised.fill
+    },
+    clock = {
+      calendar = "\u{100249}",   -- calendar
+      clock    = "\u{10042C}",   -- clock.fill
+      globe    = "\u{1001AA}",   -- globe
+    },
     media = {
       back = "􀊊",
       forward = "􀊌",
@@ -135,6 +150,19 @@ local icons = {
     memory = {
       ram = "󰍛",
       disk = "󰋊",
+    },
+    privacy = {
+      mic      = "\u{F036C}",   -- mdi:microphone
+      camera   = "\u{F0567}",   -- mdi:video
+      screen   = "\u{F0379}",   -- mdi:monitor
+      audio    = "\u{F147D}",   -- mdi:waveform
+      location = "\u{F034E}",   -- mdi:map-marker
+      unknown  = "\u{F0026}",   -- mdi:alert
+    },
+    clock = {
+      calendar = "\u{F00ED}",   -- mdi:calendar
+      clock    = "\u{F0954}",   -- mdi:clock
+      globe    = "\u{F01E7}",   -- mdi:earth
     },
     media = {
       back = "",

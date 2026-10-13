@@ -22,16 +22,16 @@ local volume_icon = sbar.add("item", "widgets.volume2", {
   display = settings.primary_display,
   position = "right",
   padding_right = settings.compact and 4 or -1,
-  icon = {
-    string = icons.volume._100,
+  -- Grauer voller Lautsprecher als Hintergrund, der aktuelle Stand liegt
+  -- weiß im Label darüber.
+  icon = svg.icon("volume._100", colors.grey, {
     width = 0,
     align = "left",
-    color = colors.grey,
     font = {
       style = settings.font.style_map["Regular"],
       size = 14.0,
     },
-  },
+  }),
   label = {
     width = 25,
     align = "left",

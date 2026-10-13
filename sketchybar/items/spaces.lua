@@ -46,7 +46,7 @@ for _, sid in ipairs(WORKSPACES) do
       padding_left = 15,
       padding_right = 8,
       color = colors.white,
-      highlight_color = colors.red,
+      highlight_color = colors.white,
     },
     label = {
       padding_right = 20,
@@ -107,10 +107,15 @@ local function highlight(focused)
     spaces[sid]:set({
       icon = { highlight = selected },
       label = { highlight = selected },
-      background = { border_color = selected and colors.black or colors.bg2 },
+      background = {
+        color = selected and colors.with_alpha(colors.active_blue, 0.45) or colors.bg1,
+        border_color = selected and colors.black or colors.bg2,
+      },
     })
     brackets[sid]:set({
-      background = { border_color = selected and colors.grey or colors.bg2 }
+      background = {
+        border_color = selected and colors.with_alpha(colors.active_blue, 0.6) or colors.bg2
+      }
     })
   end
   -- Sofort einblenden, ohne auf die aerospace-Abfrage zu warten: sonst ist die

@@ -58,7 +58,7 @@ local zunder = sbar.add("item", "zunder", {
   drawing = false,
   updates = true,
   icon = {
-    string = icons.clipboard,
+    string = icons.zunder,
     color = colors.grey,
     padding_right = 4,
   },

@@ -9,6 +9,7 @@ local icons = {
     cpu = "􀫥",
     clipboard = "􀉄",
     sms = "\u{100335}",   -- Sprechblase mit Text, für items/sms_code.lua
+    zunder = "\u{1002E6}", -- bolt.fill, für items/zunder.lua (Flammen hat schon Phönix)
 
     switch = {
       on = "􁏮",
@@ -110,6 +111,7 @@ local icons = {
     cpu = "",
     clipboard = "Missing Icon",
     sms = "\u{F0369}",    -- mdi:message-text
+    zunder = "\u{F0E7}",  -- fa:bolt
 
     switch = {
       on = "󱨥",

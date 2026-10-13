@@ -1,5 +1,6 @@
 local colors = require("colors")
 local icons = require("icons")
+local svg = require("helpers.svg_icon")
 local settings = require("settings")
 local otp = require("helpers.otp")
 
@@ -69,11 +70,7 @@ local item = sbar.add("item", "sms_code", {
   drawing = false,
   updates = "on",
   update_freq = POLL,
-  icon = {
-    string = icons.sms,
-    color = colors.green,
-    padding_left = 8,
-  },
+  icon = svg.icon("sms", colors.green, { padding_left = 8 }),
   label = {
     color = colors.white,
     padding_right = 8,

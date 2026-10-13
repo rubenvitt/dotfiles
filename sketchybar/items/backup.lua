@@ -1,5 +1,6 @@
 local colors = require("colors")
 local icons = require("icons")
+local svg = require("helpers.svg_icon")
 local settings = require("settings")
 
 -- Anzeige für das Kopia-Backup. Zwei Dinge stehen dahinter: der stündliche
@@ -143,10 +144,7 @@ local backup = sbar.add("item", "backup", {
   -- nach dem ersten drawing = false keine Events mehr und käme nie zurück.
   updates = true,
   drawing = false,
-  icon = {
-    string = "􀤃",
-    color = colors.yellow,
-  },
+  icon = svg.icon("backup.disk", colors.yellow),
   label = {
     font = { family = settings.font.text },
     color = colors.yellow,
@@ -299,7 +297,7 @@ local function apply(out)
     backup:set({
       drawing = true,
       update_freq = UPDATE_FREQ_RUNNING,
-      icon = { string = icons.wifi.upload, color = colors.blue },
+      icon = svg.icon("wifi.upload", colors.blue),
       label = { string = short_progress(oprogress, ostarted), color = colors.blue },
     })
     return
@@ -309,7 +307,7 @@ local function apply(out)
     backup:set({
       drawing = true,
       update_freq = UPDATE_FREQ,
-      icon = { string = icons.wifi.upload, color = colors.red },
+      icon = svg.icon("wifi.upload", colors.red),
       label = { string = "Fehler", color = colors.red },
     })
     return
@@ -324,7 +322,7 @@ local function apply(out)
     backup:set({
       drawing = true,
       update_freq = UPDATE_FREQ,
-      icon = { string = "􀤃", color = snap_color },
+      icon = svg.icon("backup.disk", snap_color),
       label = { string = short_age(now - ts), color = snap_color },
     })
     return
@@ -336,7 +334,7 @@ local function apply(out)
     backup:set({
       drawing = true,
       update_freq = UPDATE_FREQ,
-      icon = { string = icons.wifi.upload, color = off_warn },
+      icon = svg.icon("wifi.upload", off_warn),
       label = { string = short_age(off_age), color = off_warn },
     })
     return

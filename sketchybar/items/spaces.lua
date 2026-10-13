@@ -1,5 +1,5 @@
 local colors = require("colors")
-local icons = require("icons")
+local svg = require("helpers.svg_icon")
 local settings = require("settings")
 local app_icons = require("helpers.app_icons")
 
@@ -217,12 +217,10 @@ space_window_observer:subscribe("system_woke", update_displays)
 local spaces_indicator = sbar.add("item", {
   padding_left = -3,
   padding_right = 0,
-  icon = {
+  icon = svg.icon("switch.on", colors.grey, {
     padding_left = 8,
     padding_right = 9,
-    color = colors.grey,
-    string = icons.switch.on,
-  },
+  }),
   label = {
     width = 0,
     padding_left = 0,
@@ -236,10 +234,16 @@ local spaces_indicator = sbar.add("item", {
   }
 })
 
+-- Der Schalterzustand steht hier statt im angezeigten Zeichen: mit SVG ist
+-- icon.value leer. Die Farbe merkt sich der Hover, damit ein Umschalten sie
+-- nicht zurücksetzt.
+local indicator_on = true
+local indicator_color = colors.grey
+
 spaces_indicator:subscribe("swap_menus_and_spaces", function(env)
-  local currently_on = spaces_indicator:query().icon.value == icons.switch.on
+  indicator_on = not indicator_on
   spaces_indicator:set({
-    icon = currently_on and icons.switch.off or icons.switch.on
+    icon = svg.icon(indicator_on and "switch.on" or "switch.off", indicator_color)
   })
 end)
 
@@ -256,26 +260,28 @@ space_window_observer:subscribe("spaces_visibility", function(env)
 end)
 
 spaces_indicator:subscribe("mouse.entered", function(env)
+  indicator_color = colors.bg1
   sbar.animate("tanh", 30, function()
     spaces_indicator:set({
       background = {
         color = { alpha = 1.0 },
         border_color = { alpha = 1.0 },
       },
-      icon = { color = colors.bg1 },
+      icon = svg.color(indicator_on and "switch.on" or "switch.off", colors.bg1),
       label = { width = "dynamic" }
     })
   end)
 end)
 
 spaces_indicator:subscribe("mouse.exited", function(env)
+  indicator_color = colors.grey
   sbar.animate("tanh", 30, function()
     spaces_indicator:set({
       background = {
         color = { alpha = 0.0 },
         border_color = { alpha = 0.0 },
       },
-      icon = { color = colors.grey },
+      icon = svg.color(indicator_on and "switch.on" or "switch.off", colors.grey),
       label = { width = 0, }
     })
   end)

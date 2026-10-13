@@ -1,5 +1,6 @@
 local colors = require("colors")
 local icons = require("icons")
+local svg = require("helpers.svg_icon")
 local settings = require("settings")
 
 -- Wetter am aktuellen Standort, mit Popup aus Details und Stundenvorschau.
@@ -132,7 +133,8 @@ local function condition(code, is_day)
   if DAY_NIGHT[key] then
     key = key .. (is_day and "_day" or "_night")
   end
-  return icons.weather[key] or icons.weather.cloudy, entry[2]
+  -- Name für svg_icon; die Glyphe dazu liefert svg.glyph.
+  return "weather." .. (icons.weather[key] and key or "cloudy"), entry[2]
 end
 
 -- Ob eine Vorschaustunde noch in den Tag faellt. Gemessen wird die Mitte der
@@ -163,11 +165,7 @@ local weather = sbar.add("item", "weather", {
   updates = true,
   update_freq = UPDATE_FREQ,
   drawing = false,
-  icon = {
-    string = icons.weather.cloudy,
-    color = colors.grey,
-    padding_right = 4,
-  },
+  icon = svg.icon("weather.cloudy", colors.grey, { padding_right = 4 }),
   label = {
     font = {
       family = settings.font.numbers,
@@ -265,11 +263,7 @@ local alert = sbar.add("item", "weather.alert", {
   updates = true,
   update_freq = WARN_UPDATE_FREQ,
   drawing = false,
-  icon = {
-    string = icons.warning,
-    color = colors.orange,
-    padding_right = 4,
-  },
+  icon = svg.icon("warning", colors.orange, { padding_right = 4 }),
   label = { color = colors.orange },
   click_script = "sketchybar --set weather popup.drawing=toggle",
 })
@@ -312,7 +306,7 @@ local function update(relocate)
 
     weather:set({
       drawing = true,
-      icon = { string = symbol, color = color },
+      icon = svg.icon(symbol, color),
       label = { string = temp .. "°", color = color },
     })
 
@@ -375,7 +369,7 @@ local function update(relocate)
         local hsymbol = condition(tonumber(hcode), hday)
         forecast_rows[i]:set({
           drawing = true,
-          icon = { string = hsymbol .. "  " .. hour .. " Uhr" },
+          icon = { string = svg.glyph(hsymbol) .. "  " .. hour .. " Uhr" },
           label = { string = htemp .. "° · " .. hrain .. " %", color = value_color },
         })
       else
@@ -485,7 +479,10 @@ local function update_warnings()
     alert:set({
       drawing = true,
       icon = {
+        -- Glyphe färbt color, das SVG background.image.color; das jeweils
+        -- andere bleibt ohne Wirkung.
         color = color,
+        background = { image = { color = color } },
         -- Ohne Beschriftung sitzt das Dreieck sonst links an der Kante: der
         -- rechte Abstand ist fuer den Text da, den es dann nicht gibt.
         padding_right = label == "" and settings.paddings or 4,

@@ -1,5 +1,6 @@
 local colors = require("colors")
 local icons = require("icons")
+local svg = require("helpers.svg_icon")
 local settings = require("settings")
 
 -- Speicherdruck und freier Plattenplatz, zweizeilig und bewusst leise: beides
@@ -79,12 +80,10 @@ local ram = sbar.add("item", "widgets.memory.ram", {
   padding_left = -5,
   width = 0,
   update_freq = 8,
-  icon = {
+  icon = svg.icon("memory.ram", colors.grey, {
     padding_right = 0,
     font = { style = settings.font.style_map["Bold"], size = 9.0 },
-    string = icons.memory.ram,
-    color = colors.grey,
-  },
+  }),
   label = {
     font = {
       family = settings.font.numbers,
@@ -104,12 +103,10 @@ local disk = sbar.add("item", "widgets.memory.disk", {
   -- Der Plattenplatz ändert sich in Minuten nicht messbar; häufiger zu fragen
   -- weckt nur die Platte.
   update_freq = 300,
-  icon = {
+  icon = svg.icon("memory.disk", colors.grey, {
     padding_right = 0,
     font = { style = settings.font.style_map["Bold"], size = 9.0 },
-    string = icons.memory.disk,
-    color = colors.grey,
-  },
+  }),
   label = {
     font = {
       family = settings.font.numbers,
@@ -195,7 +192,7 @@ local function update_ram()
     if not percent then return end
     percent = tonumber(percent)
     ram:set({
-      icon = { color = pressure_color(percent) },
+      icon = svg.color("memory.ram", pressure_color(percent)),
       label = { string = percent .. "%", color = pressure_color(percent) },
     })
     ram_row:set({ label = { string = used .. " / " .. total .. " G" } })
@@ -208,7 +205,7 @@ local function update_disk()
     if not free then return end
     local color = disk_color(tonumber(free_percent))
     disk:set({
-      icon = { color = color },
+      icon = svg.color("memory.disk", color),
       label = { string = free .. "G", color = color },
     })
     disk_row:set({ label = { string = used .. " / " .. free .. " G" } })

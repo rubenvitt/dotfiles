@@ -1,4 +1,5 @@
 local icons = require("icons")
+local svg = require("helpers.svg_icon")
 local colors = require("colors")
 local settings = require("settings")
 
@@ -63,11 +64,9 @@ local tailscale = sbar.add("item", "widgets.tailscale", {
   display = settings.primary_display,
   position = "right",
   update_freq = UPDATE_FREQ,
-  icon = {
-    string = icons.tailscale.disconnected,
-    color = colors.grey,
+  icon = svg.icon("tailscale.disconnected", colors.grey, {
     font = { style = settings.font.style_map["Regular"], size = 14.0 },
-  },
+  }),
   label = {
     string = "—",
     color = colors.grey,
@@ -90,7 +89,7 @@ local tailnet = sbar.add("item", "widgets.tailscale.tailnet", {
   position = "popup." .. bracket.name,
   width = POPUP_WIDTH,
   align = "center",
-  icon = { string = icons.tailscale.connected, font = { style = settings.font.style_map["Bold"] } },
+  icon = svg.icon("tailscale.connected", colors.white, { font = { style = settings.font.style_map["Bold"] } }),
   label = {
     string = "————",
     max_chars = 24,
@@ -124,7 +123,7 @@ local exit_header = sbar.add("item", "widgets.tailscale.exit_header", {
 local exit_off = sbar.add("item", "widgets.tailscale.exit_off", {
   position = "popup." .. bracket.name,
   icon = { align = "left", string = "Keiner", width = POPUP_WIDTH / 2 },
-  label = { align = "right", string = icons.switch.off, width = POPUP_WIDTH / 2 },
+  label = { align = "right", string = "", width = POPUP_WIDTH / 2 },
 })
 
 local exit_slots = {}
@@ -133,8 +132,14 @@ for i = 1, MAX_EXIT_NODES do
     position = "popup." .. bracket.name,
     drawing = false,
     icon = { align = "left", string = "", width = POPUP_WIDTH / 2, max_chars = 18 },
-    label = { align = "right", string = icons.switch.off, width = POPUP_WIDTH / 2 },
+    label = { align = "right", string = "", width = POPUP_WIDTH / 2 },
   })
+end
+
+-- Schalter in der rechten Popup-Spalte.
+local function switch(on)
+  local name = on and "switch.on" or "switch.off"
+  return svg.align_right(svg.icon(name, on and colors.green or colors.grey), name, POPUP_WIDTH / 2, 8)
 end
 
 local function apply(s, nodes)
@@ -152,19 +157,19 @@ local function apply(s, nodes)
   if backend == "" or backend == "?" then
     -- Kein Output: CLI fehlt oder der Daemon antwortet nicht. Still ausgrauen,
     -- kein Fehlertext in der Bar.
-    icon_str, color, label_str = icons.tailscale.disconnected, colors.grey, "—"
+    icon_str, color, label_str = "tailscale.disconnected", colors.grey, "—"
   elseif backend == "NeedsLogin" or backend == "NeedsMachineAuth" then
-    icon_str, color, label_str = icons.tailscale.disconnected, colors.red, "Login"
+    icon_str, color, label_str = "tailscale.disconnected", colors.red, "Login"
   elseif not state.running then
-    icon_str, color, label_str = icons.tailscale.disconnected, colors.grey, "aus"
+    icon_str, color, label_str = "tailscale.disconnected", colors.grey, "aus"
   elseif exit_name ~= "" then
-    icon_str, color, label_str = icons.tailscale.exit_node, colors.orange, exit_name
+    icon_str, color, label_str = "tailscale.exit_node", colors.orange, exit_name
   else
-    icon_str, color, label_str, numeric = icons.tailscale.connected, colors.white, online, true
+    icon_str, color, label_str, numeric = "tailscale.connected", colors.white, online, true
   end
 
   tailscale:set({
-    icon = { string = icon_str, color = color },
+    icon = svg.icon(icon_str, color),
     label = {
       string = label_str,
       color = color,
@@ -173,7 +178,7 @@ local function apply(s, nodes)
   })
 
   tailnet:set({
-    icon = { string = icon_str, color = color },
+    icon = svg.icon(icon_str, color),
     label = tailnet_id ~= "" and tailnet_id or "Tailscale",
   })
   local known = (backend ~= "" and backend ~= "?")
@@ -181,20 +186,14 @@ local function apply(s, nodes)
   ip_row:set({ label = self_ip ~= "" and self_ip or "—" })
   peers_row:set({ label = known and (online .. " / " .. total .. " online") or "—" })
   power_row:set({
-    label = {
-      string = state.running and icons.switch.on or icons.switch.off,
-      color = state.running and colors.green or colors.grey,
-    },
+    label = switch(state.running),
   })
 
   -- Exit-Node-Auswahl ergibt nur Sinn, solange die Verbindung steht.
   exit_header:set({ drawing = state.running })
   exit_off:set({
     drawing = state.running,
-    label = {
-      string = exit_name == "" and icons.switch.on or icons.switch.off,
-      color = exit_name == "" and colors.green or colors.grey,
-    },
+    label = switch(exit_name == ""),
   })
   for i = 1, MAX_EXIT_NODES do
     local n = nodes[i]
@@ -202,10 +201,7 @@ local function apply(s, nodes)
       exit_slots[i]:set({
         drawing = true,
         icon = { string = n.name, color = n.online and colors.white or colors.grey },
-        label = {
-          string = n.active and icons.switch.on or icons.switch.off,
-          color = n.active and colors.green or colors.grey,
-        },
+        label = switch(n.active),
       })
     else
       exit_slots[i]:set({ drawing = false })

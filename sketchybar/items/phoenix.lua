@@ -1,5 +1,6 @@
 local colors = require("colors")
 local icons = require("icons")
+local svg = require("helpers.svg_icon")
 local settings = require("settings")
 
 -- Aktuelle Position in der Phönix-Progression: Woche des laufenden
@@ -38,10 +39,10 @@ local VALUE_WIDTH = 236
 local MAX_TEXT_CHARS = 36
 
 local STATE = {
-  feuer  = { icon = icons.phoenix.fire,     color = colors.orange, label = "Feuer" },
-  urlaub = { icon = icons.phoenix.vacation, color = colors.blue,   label = "Urlaub" },
-  asche  = { icon = icons.phoenix.ash,      color = colors.blue,   label = "Aschezeit" },
-  none   = { icon = icons.phoenix.rest,     color = colors.grey,   label = "kein Feuersturm" },
+  feuer  = { icon = "phoenix.fire",        color = colors.orange, label = "Feuer" },
+  urlaub = { icon = "phoenix.vacation",    color = colors.blue,   label = "Urlaub" },
+  asche  = { icon = "phoenix.ash",         color = colors.blue,   label = "Aschezeit" },
+  none   = { icon = "phoenix.rest",        color = colors.grey,   label = "kein Feuersturm" },
 }
 
 local function score_color(score)
@@ -70,11 +71,7 @@ local phoenix = sbar.add("item", "phoenix", {
   updates = true,
   update_freq = UPDATE_FREQ,
   drawing = false,
-  icon = {
-    string = icons.phoenix.rest,
-    color = colors.grey,
-    padding_right = 4,
-  },
+  icon = svg.icon("phoenix.rest", colors.grey, { padding_right = 4 }),
   label = {
     font = {
       family = settings.font.numbers,
@@ -162,7 +159,7 @@ local function update()
 
     phoenix:set({
       drawing = true,
-      icon = { string = state.icon, color = state.color },
+      icon = svg.icon(state.icon, state.color),
       label = {
         -- In der Aschezeit gibt es keine Woche zu zählen, wohl aber einen
         -- Countdown: die Bar zeigt die Tage bis zum nächsten Feuersturm.

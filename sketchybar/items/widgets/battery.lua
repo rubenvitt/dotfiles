@@ -1,4 +1,4 @@
-local icons = require("icons")
+local svg = require("helpers.svg_icon")
 local colors = require("colors")
 local settings = require("settings")
 
@@ -51,6 +51,8 @@ local bracket = sbar.add("bracket", "widgets.battery.bracket", { battery.name },
 local animation_generation = 0
 local animation = nil
 local normal_color = colors.red
+-- Name des angezeigten Symbols, für Farbwechsel ohne neues Bild.
+local icon_name = "battery._100"
 
 local function blink_stage_for(charge)
   for _, stage in ipairs(BLINK_STAGES) do
@@ -63,7 +65,7 @@ local function blink_tick(generation, lit)
   if generation ~= animation_generation then return end
   bracket:set({ background = { color = lit and animation.color or colors.bg1 } })
   battery:set({
-    icon = { color = lit and colors.black or normal_color },
+    icon = svg.color(icon_name, lit and colors.black or normal_color),
     label = { color = lit and colors.black or colors.white },
   })
   sbar.delay(animation.interval, function() blink_tick(generation, not lit) end)
@@ -73,7 +75,7 @@ local function pulse_tick(generation, dim)
   if generation ~= animation_generation then return end
   sbar.animate("sin", CHARGING_PULSE.frames, function()
     battery:set({
-      icon = { color = dim and colors.with_alpha(normal_color, CHARGING_PULSE.dim) or normal_color },
+      icon = svg.color(icon_name, dim and colors.with_alpha(normal_color, CHARGING_PULSE.dim) or normal_color),
     })
   end)
   sbar.delay(CHARGING_PULSE.interval, function() pulse_tick(generation, not dim) end)
@@ -94,7 +96,7 @@ end
 
 battery:subscribe({"routine", "power_source_change", "system_woke"}, function()
   sbar.exec("pmset -g batt", function(batt_info)
-    local icon = "!"
+    local icon = "battery._0"
     local label = "?"
 
     local found, _, charge = batt_info:find("(%d+)%%")
@@ -107,19 +109,19 @@ battery:subscribe({"routine", "power_source_change", "system_woke"}, function()
     local charging, _, _ = batt_info:find("AC Power")
 
     if charging then
-      icon = icons.battery.charging
+      icon = "battery.charging"
     else
       if found and charge > 80 then
-        icon = icons.battery._100
+        icon = "battery._100"
       elseif found and charge > 60 then
-        icon = icons.battery._75
+        icon = "battery._75"
       elseif found and charge > 40 then
-        icon = icons.battery._50
+        icon = "battery._50"
       elseif found and charge > 20 then
-        icon = icons.battery._25
+        icon = "battery._25"
         color = colors.orange
       else
-        icon = icons.battery._0
+        icon = "battery._0"
         color = colors.red
       end
     end
@@ -137,9 +139,10 @@ battery:subscribe({"routine", "power_source_change", "system_woke"}, function()
     elseif found then
       next_animation = blink_stage_for(charge)
     end
-    local icon_props = { string = icon }
+    icon_name = icon
     -- A running animation owns the icon colour.
-    if not (next_animation and next_animation == animation) then icon_props.color = color end
+    local owned = next_animation and next_animation == animation
+    local icon_props = svg.icon(icon, not owned and color or nil)
     battery:set({
       icon = icon_props,
       label = { string = lead .. label },

@@ -1,4 +1,5 @@
 local icons = require("icons")
+local svg = require("helpers.svg_icon")
 local colors = require("colors")
 local settings = require("settings")
 
@@ -17,14 +18,13 @@ local wifi_up = sbar.add("item", "widgets.wifi1", {
   position = "right",
   padding_left = -5,
   width = 0,
-  icon = {
+  icon = svg.icon("wifi.upload", colors.white, {
     padding_right = 0,
     font = {
       style = settings.font.style_map["Bold"],
       size = 9.0,
     },
-    string = icons.wifi.upload,
-  },
+  }),
   label = {
     font = {
       family = settings.font.numbers,
@@ -41,14 +41,13 @@ local wifi_down = sbar.add("item", "widgets.wifi2", {
   display = settings.primary_display,
   position = "right",
   padding_left = -5,
-  icon = {
+  icon = svg.icon("wifi.download", colors.white, {
     padding_right = 0,
     font = {
       style = settings.font.style_map["Bold"],
       size = 9.0,
     },
-    string = icons.wifi.download,
-  },
+  }),
   label = {
     font = {
       family = settings.font.numbers,
@@ -86,12 +85,11 @@ local wifi_bracket = sbar.add("bracket", "widgets.wifi.bracket", {
 
 local ssid = sbar.add("item", "widgets.wifi.ssid", {
   position = "popup." .. wifi_bracket.name,
-  icon = {
+  icon = svg.icon("wifi.router", colors.white, {
     font = {
       style = settings.font.style_map["Bold"]
     },
-    string = icons.wifi.router,
-  },
+  }),
   width = popup_width,
   align = "center",
   label = {
@@ -116,12 +114,10 @@ local power = sbar.add("item", "widgets.wifi.power", {
     string = "Wi-Fi:",
     width = popup_width / 2,
   },
-  label = {
-    string = icons.switch.off,
-    color = colors.grey,
+  label = svg.align_right(svg.icon("switch.off", colors.grey, {
     width = popup_width / 2,
     align = "right",
-  }
+  }), "switch.off", popup_width / 2, 8)
 })
 
 local hostname = sbar.add("item", "widgets.wifi.hostname", {
@@ -228,10 +224,9 @@ local function update_power()
   sbar.exec("networksetup -getairportpower en0", function(result)
     wifi_on = result:match(": On") ~= nil
     power:set({
-      label = {
-        string = wifi_on and icons.switch.on or icons.switch.off,
-        color = wifi_on and colors.green or colors.grey,
-      },
+      label = svg.align_right(
+        svg.icon(wifi_on and "switch.on" or "switch.off", wifi_on and colors.green or colors.grey),
+        wifi_on and "switch.on" or "switch.off", popup_width / 2, 8),
     })
   end)
 end
@@ -251,10 +246,8 @@ wifi:subscribe({"wifi_change", "system_woke"}, function(env)
   sbar.exec("ipconfig getifaddr en0", function(ip)
     local connected = not (ip == "")
     wifi:set({
-      icon = {
-        string = connected and icons.wifi.connected or icons.wifi.disconnected,
-        color = connected and colors.white or colors.red,
-      },
+      icon = svg.icon(connected and "wifi.connected" or "wifi.disconnected",
+        connected and colors.white or colors.red),
     })
   end)
   update_ssid()

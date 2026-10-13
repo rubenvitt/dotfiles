@@ -1,5 +1,6 @@
 local colors = require("colors")
 local icons = require("icons")
+local svg = require("helpers.svg_icon")
 local settings = require("settings")
 
 local popup_width = 250
@@ -76,15 +77,15 @@ local volume_slider = sbar.add("slider", popup_width, {
 
 volume_icon:subscribe("volume_change", function(env)
   local volume = tonumber(env.INFO)
-  local icon = icons.volume._0
+  local icon = "volume._0"
   if volume > 60 then
-    icon = icons.volume._100
+    icon = "volume._100"
   elseif volume > 30 then
-    icon = icons.volume._66
+    icon = "volume._66"
   elseif volume > 10 then
-    icon = icons.volume._33
+    icon = "volume._33"
   elseif volume > 0 then
-    icon = icons.volume._10
+    icon = "volume._10"
   end
 
   local lead = ""
@@ -92,7 +93,8 @@ volume_icon:subscribe("volume_change", function(env)
     lead = "0"
   end
 
-  volume_icon:set({ label = icon })
+  -- Das Lautsprechersymbol steht im Label, das Icon ist nur ein Platzhalter.
+  volume_icon:set({ label = svg.icon(icon, colors.white) })
   volume_percent:set({ label = lead .. volume .. "%" })
   volume_slider:set({ slider = { percentage = volume } })
 end)

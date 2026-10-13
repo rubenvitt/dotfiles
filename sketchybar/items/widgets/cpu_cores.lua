@@ -1,5 +1,6 @@
 local colors = require("colors")
 local icons = require("icons")
+local svg = require("helpers.svg_icon")
 local settings = require("settings")
 
 -- Auslastung je CPU-Kern als Balkenreihe (wie die Kern-Ansicht in iStat Menus).
@@ -169,12 +170,10 @@ end
 local cpu_cores = sbar.add("item", "widgets.cpu_cores", {
   display = settings.primary_display,
   position = "right",
-  icon = {
-    string = icons.cpu,
+  icon = svg.icon("cpu", colors.white, {
     padding_left = 8,
     padding_right = 6,
-    color = colors.white,
-  },
+  }),
   label = { drawing = false },
   padding_left = 0,
   padding_right = 0,

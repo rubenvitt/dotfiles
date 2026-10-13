@@ -1,6 +1,7 @@
 local colors = require("colors")
 local settings = require("settings")
 local icons = require("icons")
+local svg = require("helpers.svg_icon")
 
 -- Privacy-Insel. Bei ausgeblendeter Menüleiste zeichnet macOS seinen
 -- Privacy-Punkt (Mikrofon, Kamera, Bildschirm, Systemaudio) über die Bar.
@@ -129,13 +130,11 @@ for i = #KINDS, 1, -1 do
     drawing = false,
     padding_left = 0,
     padding_right = 0,
-    icon = {
-      string = icons.privacy[kind.key],
-      color = kind.color,
+    icon = svg.icon("privacy." .. kind.key, kind.color, {
       padding_left = 3,
       padding_right = 3,
       font = { style = settings.font.style_map["Bold"], size = 13.0 },
-    },
+    }),
     label = { drawing = false },
   })
   pill_items[#pill_items + 1] = glyphs[kind.key]
@@ -148,13 +147,11 @@ local unknown = sbar.add("item", "privacy.unknown", {
   drawing = false,
   padding_left = 0,
   padding_right = 0,
-  icon = {
-    string = icons.privacy.unknown,
-    color = colors.grey,
+  icon = svg.icon("privacy.unknown", colors.grey, {
     padding_left = 4,
     padding_right = 4,
     font = { style = settings.font.style_map["Bold"], size = 13.0 },
-  },
+  }),
   label = {
     drawing = false,
     string = "Unbekannt",
@@ -194,10 +191,9 @@ local popup_pos = "popup." .. cap.name
 sbar.add("item", "privacy.popup.header", {
   position = popup_pos,
   width = POPUP_WIDTH,
-  icon = {
-    string = icons.privacy.unknown,
+  icon = svg.icon("privacy.unknown", colors.white, {
     font = { style = settings.font.style_map["Bold"], size = 14.0 },
-  },
+  }),
   label = {
     string = "Sensorzugriffe",
     font = { style = settings.font.style_map["Bold"], size = 14.0 },
@@ -368,7 +364,7 @@ render = function()
     glyphs[kind.key]:set({
       drawing = show,
       display = display,
-      icon = { color = loud_kind and kind.color or colors.grey },
+      icon = svg.color("privacy." .. kind.key, loud_kind and kind.color or colors.grey),
     })
   end
 

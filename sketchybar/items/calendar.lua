@@ -1,6 +1,7 @@
 local settings = require("settings")
 local colors = require("colors")
 local icons = require("icons")
+local svg = require("helpers.svg_icon")
 
 -- Uhr. Zwei Anzeigen in der Bar, Rechtsklick schaltet um (wird gemerkt):
 --   dtg     – taktische Datums-Zeit-Gruppe ddHHMMmmmyy, z. B. 111423okt26
@@ -178,10 +179,9 @@ local popup_pos = "popup." .. cal.name
 local header = sbar.add("item", "clock.header", {
   position = popup_pos,
   width = POPUP_WIDTH,
-  icon = {
-    string = icons.clock.calendar,
+  icon = svg.icon("clock.calendar", colors.white, {
     font = { style = settings.font.style_map["Bold"], size = 14.0 },
-  },
+  }),
   label = {
     font = { style = settings.font.style_map["Bold"], size = 14.0 },
   },

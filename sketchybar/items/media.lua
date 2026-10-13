@@ -1,4 +1,5 @@
 local icons = require("icons")
+local svg = require("helpers.svg_icon")
 local colors = require("colors")
 local settings = require("settings")
 
@@ -59,19 +60,19 @@ local media_title = sbar.add("item", {
 
 sbar.add("item", {
   position = "popup." .. media_cover.name,
-  icon = { string = icons.media.back },
+  icon = svg.icon("media.back", colors.white),
   label = { drawing = false },
   click_script = "nowplaying-cli previous",
 })
 sbar.add("item", {
   position = "popup." .. media_cover.name,
-  icon = { string = icons.media.play_pause },
+  icon = svg.icon("media.play_pause", colors.white),
   label = { drawing = false },
   click_script = "nowplaying-cli togglePlayPause",
 })
 sbar.add("item", {
   position = "popup." .. media_cover.name,
-  icon = { string = icons.media.forward },
+  icon = svg.icon("media.forward", colors.white),
   label = { drawing = false },
   click_script = "nowplaying-cli next",
 })

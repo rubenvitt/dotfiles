@@ -10,6 +10,7 @@ local icons = {
     clipboard = "􀉄",
     sms = "\u{100335}",   -- Sprechblase mit Text, für items/sms_code.lua
     zunder = "\u{1002E6}", -- bolt.fill, für items/zunder.lua (Flammen hat schon Phönix)
+    backup = { disk = "\u{100903}" },   -- externaldrive.fill, für items/backup.lua
 
     switch = {
       on = "􁏮",
@@ -112,6 +113,7 @@ local icons = {
     clipboard = "Missing Icon",
     sms = "\u{F0369}",    -- mdi:message-text
     zunder = "\u{F0E7}",  -- fa:bolt
+    backup = { disk = "\u{F02CA}" },    -- mdi:harddisk
 
     switch = {
       on = "󱨥",

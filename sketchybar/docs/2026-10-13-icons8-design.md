@@ -58,6 +58,8 @@ Kein eigenes Skript und kein API-Key im System: Claude ruft die SVGs über den I
    `~/.config/mbar/icons/<name>.svg` schreiben. Ein unlesbares SVG ließe das Symbol unsichtbar, ein
    fehlendes fällt dagegen auf die Glyphe zurück.
 4. Lehnt Icons8 ab (Limit: 100 SVGs pro Stunde), die genannte Zeit warten und fortsetzen.
+5. Zeilen mit `repo:<pfad>` statt einer ID sind eigene Zeichnungen unter `sketchybar/icons/`
+   (Tailscale-Punkte, weil Icons8 kein Tailscale-Logo hat); sie werden mit gesetzter Größe kopiert.
 
 Auf einem neuen Rechner reicht „Icons abrufen“: Claude arbeitet das Manifest ab.
 

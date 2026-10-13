@@ -1,4 +1,5 @@
 # Icons8-Symbole der Bar (Stil iOS Glyph, Plattform ios11). Entwurf: docs/2026-10-13-icons8-design.md
+# Eigene Zeichnungen stehen als repo:<pfad relativ zu sketchybar/> statt einer Icons8-ID; sie werden kopiert.
 # name	icons8_id	größe_pt	common_name
 backup.disk	60988	16	hdd
 battery._0	78189	20	empty-battery
@@ -27,9 +28,9 @@ privacy.unknown	61049	14	hand
 sms	60000	16	sms
 switch.off	61039	20	toggle-off
 switch.on	61033	20	toggle-on
-tailscale.connected	61020	16	shield
-tailscale.disconnected	103947	16	delete-shield
-tailscale.exit_node	7tkH0MpdL50k	16	cyber-security
+tailscale.connected	repo:icons/tailscale.connected.svg	18	tailscale-punkte
+tailscale.disconnected	repo:icons/tailscale.disconnected.svg	18	tailscale-punkte-gedimmt
+tailscale.exit_node	repo:icons/tailscale.connected.svg	18	tailscale-punkte
 volume._0	61001	16	mute
 volume._10	91634	16	low-volume
 volume._100	59734	16	high-volume

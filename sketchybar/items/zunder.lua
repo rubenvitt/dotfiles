@@ -51,13 +51,37 @@ local STATE_COLOR = {
   late = colors.grey,
 }
 
+-- Die Flamme aus dem Zunder-Logo als Icons8-SVG (Pro-Lizenz). Sie liegt wie der
+-- Token außerhalb des öffentlichen Repos; fehlt die Datei, bleibt der Blitz aus
+-- icons.lua. mbar (ab 0.8) färbt das SVG über background.image.color ein.
+local FLAME = os.getenv("HOME") .. "/.config/mbar/icons/zunder.svg"
+local flame_file = io.open(FLAME)
+local has_flame = flame_file ~= nil
+if flame_file then flame_file:close() end
+
+-- Icon-Farbe für beide Varianten: Glyphe färbt icon.color, SVG das Bild.
+local function icon_color(color)
+  if has_flame then
+    return { background = { image = { color = color } } }
+  end
+  return { color = color }
+end
+
 local zunder = sbar.add("item", "zunder", {
   display = settings.primary_display,
   position = "right",
   -- Startet unsichtbar: der erste Abruf läuft asynchron an.
   drawing = false,
   updates = true,
-  icon = {
+  icon = has_flame and {
+    string = "",
+    padding_right = 4,
+    background = {
+      drawing = true,
+      color = colors.transparent,
+      image = { string = FLAME, color = colors.grey },
+    },
+  } or {
     string = icons.zunder,
     color = colors.grey,
     padding_right = 4,
@@ -146,7 +170,7 @@ local function update()
         -- Nicht schlicht grau: Grau ist die normale Farbe des Rückstands, ein
         -- veralteter Stand sähe damit aus wie ein gesunder.
         local stale = colors.with_alpha(colors.grey, 0.5)
-        zunder:set({ icon = { color = stale }, label = { color = stale } })
+        zunder:set({ icon = icon_color(stale), label = { color = stale } })
       end
       return
     end
@@ -164,7 +188,7 @@ local function update()
 
     zunder:set({
       drawing = (today + late) > 0,
-      icon = { color = color },
+      icon = icon_color(color),
       label = { string = label, color = color },
     })
 

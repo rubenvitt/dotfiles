@@ -146,6 +146,19 @@ def spawn_dialog(text):
     )
 
 
+# Absolut wie OSASCRIPT: unter launchd fehlt /etc/paths.d/mbar im PATH.
+SKETCHYBAR = "/Applications/mbar.app/Contents/Resources/bin/sketchybar"
+
+
+def notify_bar(active):
+    """Laesst die Bar rot blinken, solange ein Alarm offen ist (sketchybar/items/apager.lua)."""
+    subprocess.Popen(
+        [SKETCHYBAR, "--trigger", "apager_alarm", "ACTIVE=" + ("1" if active else "0")],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 class AlarmDisplay:
     """Haelt die offenen Alarme und genau einen Dialog, der sie alle zeigt.
 
@@ -157,8 +170,9 @@ class AlarmDisplay:
     der neue Dialog gerade anzeigt.
     """
 
-    def __init__(self, spawn=spawn_dialog, on_error=None):
+    def __init__(self, spawn=spawn_dialog, on_error=None, notify=notify_bar):
         self._spawn = spawn
+        self._notify = notify
         self._on_error = on_error or (lambda exc: None)
         self._lock = threading.Lock()
         self._alarms = []
@@ -174,6 +188,14 @@ class AlarmDisplay:
             self._alarms.append(alarm)
             exc = self._restart_dialog()
         if exc is not None:
+            self._on_error(exc)
+        self._notify_safely(True)
+
+    def _notify_safely(self, active):
+        # Die Bar ist Beiwerk: fehlt mbar, bleibt der Dialog trotzdem.
+        try:
+            self._notify(active)
+        except Exception as exc:
             self._on_error(exc)
 
     def _restart_dialog(self):
@@ -217,6 +239,7 @@ class AlarmDisplay:
                 return  # ersetzt, nicht quittiert
             self._alarms = []
             self._proc = None
+        self._notify_safely(False)
 
 
 MAX_BODY_BYTES = 64 * 1024

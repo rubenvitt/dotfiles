@@ -378,7 +378,8 @@ class TestAlarmDisplay(unittest.TestCase):
             self.spawned.append(proc)
             return proc
 
-        self.display = listener.AlarmDisplay(spawn=fake_spawn)
+        self.notified = []
+        self.display = listener.AlarmDisplay(spawn=fake_spawn, notify=self.notified.append)
 
     def _alarm(self, minute, text):
         return listener.Alarm(datetime(2026, 9, 10, 14, minute, 0), text)
@@ -407,6 +408,30 @@ class TestAlarmDisplay(unittest.TestCase):
             time.sleep(0.01)
         self.assertEqual(self.display.pending(), [])
 
+    def test_bar_blinks_until_acknowledged(self):
+        self.display.add(self._alarm(0, "ERSTER"))
+        self.display.add(self._alarm(5, "ZWEITER"))
+        self.assertEqual(self.notified, [True, True])
+
+        self.spawned[1].finish()
+        deadline = time.time() + 5
+        while len(self.notified) < 3 and time.time() < deadline:
+            time.sleep(0.01)
+        # Der ersetzte erste Dialog schaltet die Bar nicht ab.
+        self.assertEqual(self.notified, [True, True, False])
+
+    def test_a_failing_notify_still_opens_the_dialog(self):
+        def broken_notify(active):
+            raise OSError("mbar fehlt")
+
+        errors = []
+        display = listener.AlarmDisplay(
+            spawn=lambda text: FakeProc(text), on_error=errors.append, notify=broken_notify
+        )
+        display.add(self._alarm(0, "ERSTER"))
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(len(display.pending()), 1)
+
     def test_replaced_dialog_does_not_clear_the_new_list(self):
         # Der Kern der Sache: der Watcher des ersten Dialogs endet, weil wir
         # ihn ersetzt haben — nicht, weil jemand quittiert hat. Er darf die
@@ -422,7 +447,9 @@ class TestAlarmDisplay(unittest.TestCase):
             raise OSError("osascript fehlt")
 
         errors = []
-        display = listener.AlarmDisplay(spawn=broken_spawn, on_error=errors.append)
+        display = listener.AlarmDisplay(
+            spawn=broken_spawn, on_error=errors.append, notify=lambda active: None
+        )
         display.add(self._alarm(0, "ERSTER"))
 
         self.assertEqual(len(errors), 1)

@@ -369,6 +369,24 @@ class FakeProc:
         self._done.set()
 
 
+class TestBarSummary(unittest.TestCase):
+    def _alarm(self, text):
+        return listener.Alarm(datetime(2026, 9, 10, 14, 7, 0), text)
+
+    def test_field_values_without_names_on_one_line(self):
+        text = listener.readable_request(
+            "POST", "/alarm/x", "", b'{"keyword": "B3 Wohnung  Person", "unit": "LZ 1"}'
+        )
+        self.assertEqual(
+            listener.bar_summary(self._alarm(text)), "14:07  B3 Wohnung  Person · LZ 1"
+        )
+
+    def test_raw_text_stays_whole_and_is_capped(self):
+        summary = listener.bar_summary(self._alarm("kein json  hier\n" + "x" * 300))
+        self.assertTrue(summary.startswith("14:07  kein json  hier · xxx"))
+        self.assertEqual(len(summary), listener.BAR_MAX_CHARS)
+
+
 class TestAlarmDisplay(unittest.TestCase):
     def setUp(self):
         self.spawned = []
@@ -411,17 +429,17 @@ class TestAlarmDisplay(unittest.TestCase):
     def test_bar_blinks_until_acknowledged(self):
         self.display.add(self._alarm(0, "ERSTER"))
         self.display.add(self._alarm(5, "ZWEITER"))
-        self.assertEqual(self.notified, [True, True])
+        self.assertEqual([len(a) for a in self.notified], [1, 2])
 
         self.spawned[1].finish()
         deadline = time.time() + 5
         while len(self.notified) < 3 and time.time() < deadline:
             time.sleep(0.01)
         # Der ersetzte erste Dialog schaltet die Bar nicht ab.
-        self.assertEqual(self.notified, [True, True, False])
+        self.assertEqual([len(a) for a in self.notified], [1, 2, 0])
 
     def test_a_failing_notify_still_opens_the_dialog(self):
-        def broken_notify(active):
+        def broken_notify(alarms):
             raise OSError("mbar fehlt")
 
         errors = []
@@ -448,7 +466,7 @@ class TestAlarmDisplay(unittest.TestCase):
 
         errors = []
         display = listener.AlarmDisplay(
-            spawn=broken_spawn, on_error=errors.append, notify=lambda active: None
+            spawn=broken_spawn, on_error=errors.append, notify=lambda alarms: None
         )
         display.add(self._alarm(0, "ERSTER"))
 

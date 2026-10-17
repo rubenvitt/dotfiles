@@ -150,13 +150,33 @@ def spawn_dialog(text):
 SKETCHYBAR = "/Applications/mbar.app/Contents/Resources/bin/sketchybar"
 
 
-def notify_bar(active):
-    """Laesst die Bar rot blinken, solange ein Alarm offen ist (sketchybar/items/apager.lua)."""
-    subprocess.Popen(
-        [SKETCHYBAR, "--trigger", "apager_alarm", "ACTIVE=" + ("1" if active else "0")],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+# Die Bar hat Platz fuer eine Zeile; vollstaendig steht der Alarm im Dialog.
+BAR_MAX_CHARS = 100
+
+
+def bar_summary(alarm):
+    """Der Alarm als eine Zeile fuer die Bar: Uhrzeit und Feldwerte ohne Feldnamen."""
+    parts = []
+    for line in alarm.text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("[..."):
+            continue
+        # "keyword  Wert" aus _json_object_display; alles andere bleibt ganz.
+        match = re.match(r"^[\w-]{1,%d}\s{2,}(\S.*)$" % FIELD_NAME_PAD_CAP, line)
+        parts.append(match.group(1) if match else line)
+    text = "{}  {}".format(alarm.received_at.strftime("%H:%M"), " · ".join(parts))
+    return text[:BAR_MAX_CHARS]
+
+
+def notify_bar(alarms):
+    """Bar zeigt den neuesten Alarm und blinkt rot, bis quittiert ist (sketchybar/items/apager.lua)."""
+    args = [SKETCHYBAR, "--trigger", "apager_alarm"]
+    if alarms:
+        more = " (+{})".format(len(alarms) - 1) if len(alarms) > 1 else ""
+        args += ["ACTIVE=1", "TEXT=" + bar_summary(alarms[-1]) + more]
+    else:
+        args += ["ACTIVE=0"]
+    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 class AlarmDisplay:
@@ -187,14 +207,15 @@ class AlarmDisplay:
         with self._lock:
             self._alarms.append(alarm)
             exc = self._restart_dialog()
+            alarms = list(self._alarms)
         if exc is not None:
             self._on_error(exc)
-        self._notify_safely(True)
+        self._notify_safely(alarms)
 
-    def _notify_safely(self, active):
+    def _notify_safely(self, alarms):
         # Die Bar ist Beiwerk: fehlt mbar, bleibt der Dialog trotzdem.
         try:
-            self._notify(active)
+            self._notify(alarms)
         except Exception as exc:
             self._on_error(exc)
 
@@ -239,7 +260,7 @@ class AlarmDisplay:
                 return  # ersetzt, nicht quittiert
             self._alarms = []
             self._proc = None
-        self._notify_safely(False)
+        self._notify_safely([])
 
 
 MAX_BODY_BYTES = 64 * 1024

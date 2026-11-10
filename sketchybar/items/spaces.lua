@@ -17,7 +17,9 @@ local app_icons = require("helpers.app_icons")
 -- items/menus.lua ("/space\\..*/") unverändert greifen.
 
 local AEROSPACE = "/opt/homebrew/bin/aerospace"
-local WORKSPACES = { "1", "2", "3", "4", "5", "6", "7", "8", "9" }
+-- S1-S3 liegen auf dem virtuellen Screensharing-Monitor, M/C/P sind die
+-- App-Workspaces Mail/Chat/Player (siehe aerospace.toml).
+local WORKSPACES = { "1", "2", "3", "4", "5", "6", "7", "8", "9", "M", "C", "P", "S1", "S2", "S3" }
 
 sbar.add("event", "aerospace_workspace_change")
 
@@ -164,17 +166,29 @@ local function update_windows()
   end)
 end
 
--- Jede Bar zeigt nur die Workspaces ihres eigenen Monitors. Als Display-Nummer
--- taugt allein monitor-appkit-nsscreen-screens-id: aerospace' eigene monitor-id
--- zaehlt von links nach rechts, sketchybar dagegen nach NSScreen.screens --
--- bei zwei gleichen Monitoren faellt der Unterschied nur nicht auf.
--- Die Zuordnung aendert sich auch ohne Monitorwechsel (move-workspace-to-monitor),
--- deshalb haengt der Aufruf am Workspace-Wechsel und nicht nur an display_change.
+-- Jede Bar zeigt nur die Workspaces ihres eigenen Monitors. Weder aerospace'
+-- monitor-id (links nach rechts) noch monitor-appkit-nsscreen-screens-id passt
+-- verlässlich zu sketchybars Display-Nummer (Reihenfolge von --query displays):
+-- mit drei Monitoren landete Workspace 6 so auf dem virtuellen statt dem
+-- zweiten. Deshalb die Displays wie aerospace nach Position sortieren; Rang =
+-- monitor-id, Wert = sketchybars Nummer.
+-- Die Zuordnung ändert sich auch ohne Monitorwechsel (move-workspace-to-monitor),
+-- deshalb hängt der Aufruf am Workspace-Wechsel und nicht nur an display_change.
+local DISPLAY_QUERY = "sketchybar --query displays | /opt/homebrew/bin/jq -r "
+  .. "'to_entries | sort_by(.value.frame.x, .value.frame.y) | to_entries[] | \"\\(.key+1) \\(.value.key+1)\"'; "
+  .. AEROSPACE .. " list-workspaces --all --format '%{workspace}|%{monitor-id}'"
+
 local function update_displays()
-  sbar.exec(AEROSPACE .. " list-workspaces --all --format '%{workspace}|%{monitor-appkit-nsscreen-screens-id}'", function(out)
+  sbar.exec(DISPLAY_QUERY, function(out)
+    local display_of = {}
     for line in string.gmatch(out or "", "[^\r\n]+") do
-      local sid, display = string.match(line, "^(.-)|%s*(%d+)%s*$")
-      if sid and spaces[sid] then
+      local monitor, display = string.match(line, "^(%d+) (%d+)$")
+      if monitor then display_of[monitor] = display end
+    end
+    for line in string.gmatch(out or "", "[^\r\n]+") do
+      local sid, monitor = string.match(line, "^(.-)|%s*(%d+)%s*$")
+      local display = display_of[monitor]
+      if sid and spaces[sid] and display then
         spaces[sid]:set({ display = display })
         paddings[sid]:set({ display = display })
         brackets[sid]:set({ display = display })
@@ -214,13 +228,12 @@ update_displays()
 space_window_observer:subscribe("display_change", update_displays)
 space_window_observer:subscribe("system_woke", update_displays)
 
+local INDICATOR_PADDING = { padding_left = 6, padding_right = 6 }
+
 local spaces_indicator = sbar.add("item", {
   padding_left = -3,
   padding_right = 0,
-  icon = svg.icon("switch.on", colors.grey, {
-    padding_left = 8,
-    padding_right = 9,
-  }),
+  icon = svg.icon("chevron.right", colors.grey, INDICATOR_PADDING),
   label = {
     width = 0,
     padding_left = 0,
@@ -234,16 +247,20 @@ local spaces_indicator = sbar.add("item", {
   }
 })
 
--- Der Schalterzustand steht hier statt im angezeigten Zeichen: mit SVG ist
+-- Der Ansichtszustand steht hier statt im angezeigten Zeichen: mit SVG ist
 -- icon.value leer. Die Farbe merkt sich der Hover, damit ein Umschalten sie
 -- nicht zurücksetzt.
 local indicator_on = true
 local indicator_color = colors.grey
+-- Der Pfeil zeigt zur anderen Ansicht: rechts zu den Menüs, links zurück.
+local function indicator_icon()
+  return indicator_on and "chevron.right" or "chevron.left"
+end
 
 spaces_indicator:subscribe("swap_menus_and_spaces", function(env)
   indicator_on = not indicator_on
   spaces_indicator:set({
-    icon = svg.icon(indicator_on and "switch.on" or "switch.off", indicator_color)
+    icon = svg.icon(indicator_icon(), indicator_color, INDICATOR_PADDING)
   })
 end)
 
@@ -267,7 +284,7 @@ spaces_indicator:subscribe("mouse.entered", function(env)
         color = { alpha = 1.0 },
         border_color = { alpha = 1.0 },
       },
-      icon = svg.color(indicator_on and "switch.on" or "switch.off", colors.bg1),
+      icon = svg.color(indicator_icon(), colors.bg1),
       label = { width = "dynamic" }
     })
   end)
@@ -281,7 +298,7 @@ spaces_indicator:subscribe("mouse.exited", function(env)
         color = { alpha = 0.0 },
         border_color = { alpha = 0.0 },
       },
-      icon = svg.color(indicator_on and "switch.on" or "switch.off", colors.grey),
+      icon = svg.color(indicator_icon(), colors.grey),
       label = { width = 0, }
     })
   end)

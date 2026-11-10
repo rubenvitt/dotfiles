@@ -59,3 +59,5 @@ wifi.download	102673	9	thick-arrow-pointing-down
 wifi.router	69544	16	wifi-router
 wifi.upload	100000	9	up
 zunder	60985	16	fire-element
+chevron.left	repo:icons/chevron.left.svg	14	chevron-dünn
+chevron.right	repo:icons/chevron.right.svg	14	chevron-dünn

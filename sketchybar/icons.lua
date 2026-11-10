@@ -16,6 +16,7 @@ local icons = {
       on = "􁏮",
       off = "􁏯",
     },
+    chevron = { left = "􀆉", right = "􀆊" },
     -- Amtliche Warnung. Die Stufe steckt in der Farbe, nicht im Symbol:
     -- der DWD faerbt seine vier Stufen, er zeichnet sie nicht verschieden.
     warning = "􀇿",   -- exclamationmark.triangle.fill
@@ -119,6 +120,7 @@ local icons = {
       on = "󱨥",
       off = "󱨦",
     },
+    chevron = { left = "\u{F0141}", right = "\u{F0142}" },  -- mdi:chevron-left/right
     warning = "󰀦",   -- mdi:alert
     volume = {
       _100="",

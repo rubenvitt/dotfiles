@@ -43,8 +43,10 @@ focus-follows-mouse.enabled = false
 # damit ist die Layout-Frage irrelevant.
 key-mapping.preset = 'qwerty'
 
-# Nur die Workspaces, die auch gebunden sind.
-persistent-workspaces = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
+# Nur die Workspaces, die auch gebunden sind. S1-S3 gehören dem virtuellen
+# Screensharing-Monitor; persistent, damit AeroSpace ihm S1 gibt, statt einen
+# Workspace "10" anzulegen.
+persistent-workspaces = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'S1', 'S2', 'S3']
 
 # Abstände. outer.top ist monitorabhängig. Die macOS-Menüleiste bleibt
 # eingeblendet (39 pt), die 40 pt hohe Bar liegt darüber (topmost=on): Bei
@@ -82,6 +84,13 @@ gaps.outer.right      = 8
 # Achtung: ctrl-alt-shift-tab (move-workspace-to-monitor) ist fuer die
 # Workspaces 1-9 damit wirkungslos, eine Zuweisung schlaegt den Befehl.
 # Wer den Befehl behalten will, nimmt die betreffenden Zeilen hier raus.
+# Dritter Monitor zum Screensharing (BetterDisplay "Virtuell 16:9"): Er bekommt
+# eigene Workspaces S1-S3, per Name zugewiesen. Er muss in der Anordnung rechts
+# der beiden PA279CRV stehen, sonst verschieben sich die Sequenznummern 1/2.
+# Ohne ihn landen S1-S3 auf Monitor 1 (links), als Reserve neben 1-5.
+# App-Workspaces M (Mail), C (Chat), P (Player), erreichbar über die Hyper-Taste
+# (Moonlander, rechter Daumen). C und P sind fest rechts; M entsteht auf dem
+# Monitor, der beim ersten Fenster fokussiert ist.
 [workspace-to-monitor-force-assignment]
 1 = 1
 2 = 1
@@ -92,6 +101,11 @@ gaps.outer.right      = 8
 7 = 2
 8 = 2
 9 = 2
+S1 = ['^Virtuell', 1]
+S2 = ['^Virtuell', 1]
+S3 = ['^Virtuell', 1]
+C = 2
+P = 2
 
 [[on-window-detected]]
 if = 'test %{app-bundle-id} = com.apple.systempreferences'
@@ -110,6 +124,26 @@ run = ['layout floating']
 [[on-window-detected]]
 if = 'test %{app-bundle-id} = com.raycast.macos'
 run = ['layout floating']
+
+# App-Workspaces. Die Regeln greifen nur beim Öffnen eines Fensters; danach
+# lässt es sich wie jedes andere mit ctrl-alt-shift-<n> verschieben.
+# Mail: hinterher, sonst verschwindet ein neues Fenster (Cmd+N,
+# mailto-Link) von dem Workspace, auf dem man gerade arbeitet.
+[[on-window-detected]]
+if = 'test %{app-bundle-id} = com.apple.mail || test %{app-bundle-id} = com.fastmail.mac.Fastmail'
+run = ['move-node-to-workspace M', 'workspace M']
+
+# Chat ohne hinterher, und Meetings/Huddles bleiben, wo sie aufgehen.
+# shortcut: die Meeting-Titel sind geraten; geht ein Meeting-Fenster doch auf
+# C auf, im Meeting den Titel mit `aerospace list-windows --all` nachsehen.
+[[on-window-detected]]
+if = '(test %{app-bundle-id} = com.microsoft.teams2 || test %{app-bundle-id} = com.tinyspeck.slackmacgap) && test-not %{window-title} ~= "Besprechung|Meeting|Anruf|Call|Huddle"'
+run = 'move-node-to-workspace C'
+
+# Medien ohne hinterher: Musik starten, weiterarbeiten.
+[[on-window-detected]]
+if = 'test %{app-bundle-id} = com.spotify.client || test %{app-bundle-id} = com.apple.Music || test %{app-bundle-id} = com.apple.podcasts'
+run = 'move-node-to-workspace P'
 
 # ── Haupt-Modus ─────────────────────────────────────────────────────────────
 [mode.main.binding]
@@ -136,6 +170,26 @@ run = ['layout floating']
     ctrl-alt-7 = 'workspace 7'
     ctrl-alt-8 = 'workspace 8'
     ctrl-alt-9 = 'workspace 9'
+    # Screensharing-Workspaces; minus/equal sind auf DE-Layout ß und ´
+    ctrl-alt-0     = 'workspace S1'
+    ctrl-alt-minus = 'workspace S2'
+    ctrl-alt-equal = 'workspace S3'
+    ctrl-alt-q     = 'workspace S3'   # Split-Tastatur ohne ´-Taste
+    # Hyper wechselt wie ctrl-alt, zusätzlich auf die App-Workspaces.
+    # Z/Y meiden: AeroSpace meint die QWERTY-Position.
+    cmd-ctrl-alt-shift-m = 'workspace M'
+    cmd-ctrl-alt-shift-c = 'workspace C'
+    cmd-ctrl-alt-shift-p = 'workspace P'
+    cmd-ctrl-alt-shift-1 = 'workspace 1'
+    cmd-ctrl-alt-shift-2 = 'workspace 2'
+    cmd-ctrl-alt-shift-3 = 'workspace 3'
+    cmd-ctrl-alt-shift-4 = 'workspace 4'
+    cmd-ctrl-alt-shift-5 = 'workspace 5'
+    cmd-ctrl-alt-shift-6 = 'workspace 6'
+    cmd-ctrl-alt-shift-7 = 'workspace 7'
+    cmd-ctrl-alt-shift-8 = 'workspace 8'
+    cmd-ctrl-alt-shift-9 = 'workspace 9'
+    cmd-ctrl-alt-shift-0 = 'workspace S1'
 
     # Fenster auf Workspace verschieben (und mitgehen)
     ctrl-alt-shift-1 = ['move-node-to-workspace 1', 'workspace 1']
@@ -147,6 +201,10 @@ run = ['layout floating']
     ctrl-alt-shift-7 = ['move-node-to-workspace 7', 'workspace 7']
     ctrl-alt-shift-8 = ['move-node-to-workspace 8', 'workspace 8']
     ctrl-alt-shift-9 = ['move-node-to-workspace 9', 'workspace 9']
+    ctrl-alt-shift-0     = ['move-node-to-workspace S1', 'workspace S1']
+    ctrl-alt-shift-minus = ['move-node-to-workspace S2', 'workspace S2']
+    ctrl-alt-shift-equal = ['move-node-to-workspace S3', 'workspace S3']
+    ctrl-alt-shift-q     = ['move-node-to-workspace S3', 'workspace S3']
 
     # Zuletzt genutzter Workspace / Workspace auf anderen Monitor
     ctrl-alt-tab       = 'workspace-back-and-forth'
@@ -178,6 +236,13 @@ run = ['layout floating']
     r         = ['flatten-workspace-tree', 'mode main']   # Layout zurücksetzen
     f         = ['layout floating tiling', 'mode main']
     backspace = ['close-all-windows-but-current', 'mode main']
+
+    # Fenster auf die App-Workspaces schieben (und mitgehen). Hier statt
+    # ctrl-alt-shift-<Buchstabe>, weil das mit App-Shortcuts kollidieren kann
+    # (JetBrains: ctrl-alt-shift-c = Copy Reference).
+    m = ['move-node-to-workspace M', 'workspace M', 'mode main']
+    c = ['move-node-to-workspace C', 'workspace C', 'mode main']
+    p = ['move-node-to-workspace P', 'workspace P', 'mode main']
 
     left  = ['join-with left', 'mode main']
     down  = ['join-with down', 'mode main']

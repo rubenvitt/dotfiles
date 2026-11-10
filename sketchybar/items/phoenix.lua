@@ -80,7 +80,6 @@ local phoenix = sbar.add("item", "phoenix", {
     color = colors.grey,
   },
   popup = popup.host("right"),
-  click_script = "sketchybar --set phoenix popup.drawing=toggle",
 })
 
 local function add_row(name)
@@ -96,6 +95,8 @@ end
 local function add_rule(name)
   return popup.rule("phoenix", "phoenix.rule." .. name, { width = WIDTH, drawing = true })
 end
+
+phoenix:subscribe("mouse.clicked", function() popup.toggle("phoenix") end)
 
 popup.gap("phoenix", "phoenix.gap.top", 6, { width = WIDTH, drawing = true })
 local header = popup.header("phoenix", "phoenix.header", {

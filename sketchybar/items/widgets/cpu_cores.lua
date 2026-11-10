@@ -64,8 +64,9 @@ end
 local NAME_WIDTH = 200
 local NAME_CHARS = 28
 local TOP_ROWS = 5
--- Ein Punkt je Provider-Tick (2 s): gut zwei Minuten Rueckblick.
-local HISTORY_POINTS = 64
+-- Ein Punkt je Provider-Tick (2 s) und je Punkt Breite: der Graph füllt die
+-- Popup-Breite und blickt damit knapp neun Minuten zurück.
+local HISTORY_POINTS = popup.WIDTH - 2 * popup.INSET
 
 -- `ps` formatiert pcpu nach LC_NUMERIC; unter de_DE kommt "69,7" zurück, was
 -- tonumber() nicht lesen kann. Das Präfix deckt den Normalfall ab, greift aber
@@ -230,12 +231,12 @@ local bracket = sbar.add("bracket", "widgets.cpu_cores.bracket", members, {
 local P = bracket.name
 popup.gap(P, "widgets.cpu_cores.gap.top", 6, { drawing = true })
 local header = popup.header(P, "widgets.cpu_cores.header", { drawing = true })
-header:set({ icon = { string = "Prozessor" }, label = { string = "letzte 2 Minuten" } })
+header:set({ icon = { string = "Prozessor" }, label = { string = "letzte " .. math.floor(HISTORY_POINTS * 2 / 60 + 0.5) .. " Minuten" } })
 
 -- Der Verlauf der Gesamtauslastung, frueher ein eigenes Widget in der Bar.
 -- Im Popup stoert er nicht und beantwortet trotzdem die Frage, ob die aktuelle
 -- Last eine Spitze oder ein Dauerzustand ist. Ein Punkt je Provider-Tick, also
--- gut zwei Minuten Historie.
+-- knapp neun Minuten Historie.
 --
 -- updates = true ist Pflicht: Popup-Items gelten bei geschlossenem Popup als
 -- nicht sichtbar, und mit dem geerbten when_shown bliebe der Graph leer, bis
@@ -303,6 +304,7 @@ local function toggle_popup()
   -- Auf "off" prüfen wie in wifi.lua: nur dieser Wert ist in dieser Config
   -- belegt, ein unerwarteter Zustand schließt dann statt neu zu öffnen.
   if bracket:query().popup.drawing == "off" then
+    popup.close_others(P)
     bracket:set({ popup = { drawing = true } })
     fill_rows()
   else

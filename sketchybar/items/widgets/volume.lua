@@ -151,6 +151,7 @@ local function volume_toggle_details(env)
     volume_collapse_details()
     return
   end
+  popup.close_others(P)
   volume_bracket:set({ popup = { drawing = true } })
   sbar.exec("SwitchAudioSource -t output -c", function(result)
     local current = result:sub(1, -2)

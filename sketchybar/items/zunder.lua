@@ -63,8 +63,9 @@ local zunder = sbar.add("item", "zunder", {
   },
   update_freq = UPDATE_FREQ,
   popup = popup.host("right"),
-  click_script = "sketchybar --set zunder popup.drawing=toggle",
 })
+
+zunder:subscribe("mouse.clicked", function() popup.toggle("zunder") end)
 
 popup.gap("zunder", "zunder.gap.top", 6, { drawing = true })
 local header = popup.header("zunder", "zunder.header", { drawing = true })

@@ -203,6 +203,7 @@ end
 local function toggle_details()
   local should_draw = wifi_bracket:query().popup.drawing == "off"
   if should_draw then
+    popup.close_others(P)
     wifi_bracket:set({ popup = { drawing = true }})
     update_power()
     sbar.exec("networksetup -getcomputername", function(result)

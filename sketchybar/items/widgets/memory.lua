@@ -236,6 +236,7 @@ end
 
 local function toggle_details()
   if bracket:query().popup.drawing == "off" then
+    popup.close_others(P)
     bracket:set({ popup = { drawing = true } })
     update_processes()
   else

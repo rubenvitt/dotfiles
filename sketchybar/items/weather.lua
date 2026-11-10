@@ -170,7 +170,6 @@ local weather = sbar.add("item", "weather", {
     color = colors.grey,
   },
   popup = popup.host("right"),
-  click_script = "sketchybar --set weather popup.drawing=toggle",
 })
 
 -- Zeilen einmal anlegen: im Update-Callback erzeugt entstuende bei jedem
@@ -251,8 +250,10 @@ local alert = sbar.add("item", "weather.alert", {
   drawing = false,
   icon = svg.icon("warning", colors.orange, { padding_right = 4 }),
   label = { color = colors.orange },
-  click_script = "sketchybar --set weather popup.drawing=toggle",
 })
+
+weather:subscribe("mouse.clicked", function() popup.toggle("weather") end)
+alert:subscribe("mouse.clicked", function() popup.toggle("weather") end)
 
 -- relocate laesst den Helfer den Standort neu bestimmen statt seinen Cache zu
 -- benutzen. Genau dafuer ist system_woke da: zwischen Zuklappen und Aufklappen

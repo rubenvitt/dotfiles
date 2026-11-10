@@ -150,7 +150,6 @@ local backup = sbar.add("item", "backup", {
   },
   update_freq = UPDATE_FREQ,
   popup = popup.host("right"),
-  click_script = "sketchybar --set backup popup.drawing=toggle",
 })
 
 -- Zeilen einmalig anlegen: im Update-Callback erzeugt jeder Durchlauf neue
@@ -166,6 +165,8 @@ end
 local function popup_rule(name, drawing)
   return popup.rule("backup", "backup.rule." .. name, { width = WIDTH, drawing = drawing ~= false })
 end
+
+backup:subscribe("mouse.clicked", function() popup.toggle("backup") end)
 
 popup.gap("backup", "backup.gap.top", 6, { width = WIDTH, drawing = true })
 popup_row("header", "Backup", {

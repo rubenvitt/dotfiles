@@ -476,7 +476,10 @@ local function toggle_popup(env)
     return
   end
   local open = cap:query().popup.drawing == "off"
-  if open then render_popup() end
+  if open then
+    popup.close_others(cap.name)
+    render_popup()
+  end
   cap:set({ popup = { drawing = open } })
 end
 

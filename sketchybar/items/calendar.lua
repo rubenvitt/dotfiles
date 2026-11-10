@@ -438,7 +438,10 @@ cal:subscribe("mouse.clicked", function(env)
   -- von außen, ein eigener Merker stünde dann falsch und der nächste Klick
   -- ginge ins Leere.
   popup_open = cal:query().popup.drawing == "off"
-  if popup_open then render_popup() end
+  if popup_open then
+    popup.close_others(cal.name)
+    render_popup()
+  end
   cal:set({ popup = { drawing = popup_open } })
 end)
 

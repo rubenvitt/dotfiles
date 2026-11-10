@@ -13,6 +13,9 @@ local settings = require("settings")
 
 local M = {}
 
+-- Alle Popup-Eltern, für close_others.
+local hosts = {}
+
 M.INSET = 16
 M.WIDTH = 300
 M.ROW_HEIGHT = 26
@@ -37,6 +40,7 @@ end
 -- Die Feldbreiten schließen ihr Polster ein.
 function M.row(parent, name, opts)
   opts = opts or {}
+  hosts[parent] = true
   local width = opts.width or M.WIDTH
   local caption = opts.caption_width or math.floor((width - 2 * M.INSET) / 2)
   return sbar.add("item", name, {
@@ -113,6 +117,7 @@ end
 -- opts: width (ganze Zeile), color, height, drawing.
 function M.rule(parent, name, opts)
   opts = opts or {}
+  hosts[parent] = true
   return sbar.add("item", name, {
     position = "popup." .. parent,
     drawing = opts.drawing or false,
@@ -135,6 +140,28 @@ end
 -- Unsichtbarer Abstand, oben und unten im Popup (8 bzw. 6 Punkt).
 function M.gap(parent, name, height, opts)
   return M.rule(parent, name, merge({ color = colors.transparent, height = height }, opts))
+end
+
+-- Für Popups, die keine Zeilen aus diesem Modul haben (Mediensteuerung).
+function M.register(name)
+  hosts[name] = true
+end
+
+-- Vor dem Öffnen eines Popups aufrufen: schließt alle anderen.
+-- shortcut: Nachbau von popup_exclusive für mbar < 0.9; entfällt, sobald 0.9
+-- überall installiert ist (dann erledigt mbar das selbst, siehe bar.lua).
+function M.close_others(name)
+  if settings.glass then return end
+  for host in pairs(hosts) do
+    if host ~= name then sbar.set(host, { popup = { drawing = false } }) end
+  end
+end
+
+-- Öffnet oder schließt das Popup von `name`; beim Öffnen gehen die anderen zu.
+function M.toggle(name)
+  local open = sbar.query(name).popup.drawing == "off"
+  if open then M.close_others(name) end
+  sbar.set(name, { popup = { drawing = open } })
 end
 
 return M

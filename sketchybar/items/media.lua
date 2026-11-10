@@ -2,6 +2,7 @@ local icons = require("icons")
 local svg = require("helpers.svg_icon")
 local colors = require("colors")
 local settings = require("settings")
+local popup = require("helpers.popup")
 
 local whitelist = { ["Spotify"] = true,
                     ["Music"] = true    };
@@ -59,6 +60,8 @@ local media_title = sbar.add("item", {
     y_offset = -5,
   },
 })
+
+popup.register(media_cover.name)
 
 -- Knopf ohne Rahmen: im Popup trägt das Glas die Fläche.
 local function media_button(name, click_script)
@@ -118,7 +121,7 @@ media_cover:subscribe("mouse.exited", function(env)
 end)
 
 media_cover:subscribe("mouse.clicked", function(env)
-  media_cover:set({ popup = { drawing = "toggle" }})
+  popup.toggle(media_cover.name)
 end)
 
 media_title:subscribe("mouse.exited.global", function(env)

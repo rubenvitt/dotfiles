@@ -156,6 +156,7 @@ end)
 
 battery:subscribe("mouse.clicked", function(env)
   local drawing = battery:query().popup.drawing
+  if drawing == "off" then popup.close_others(P) end
   battery:set( { popup = { drawing = "toggle" } })
 
   if drawing == "off" then

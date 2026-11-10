@@ -8,8 +8,21 @@ Ausgabe sind Zeilen, die sich in Lua ohne JSON-Parser auswerten lassen:
     D|<max>|<min>|<sonnenaufgang>|<sonnenuntergang>
     H|<stunde>|<wmo-code>|<temp>|<regen-prozent>
 
-Das Wetter kommt ohne API-Schluessel von Open-Meteo, weil dieses Repo
-oeffentlich ist. Der Nutzer wechselt als Berater staendig den Ort, ein fest
+Das Wetter kommt von Witterung, dem eigenen Aggregator des Nutzers (Konsens aus
+mehreren Modellen, dazu gemessene Werte der nächsten DWD-Station). Adresse und
+Bearer-Token stehen nicht hier, weil dieses Repo öffentlich ist, sondern im
+Schlüsselbund unter dem Dienst dev.rubeen.witterung (Konto = Adresse,
+Passwort = Token). Einrichten, nachdem auf dem Server
+`docker exec witterung witterung device-add Mac-Leiste` das Token ausgegeben hat:
+
+    security add-generic-password -U -s dev.rubeen.witterung -a https://<host> -w
+
+Fehlt der Eintrag -- frische Maschine, fremder Rechner --, kommt das Wetter
+wie bisher ohne Schlüssel von Open-Meteo. Witterung liefert Zustände statt
+WMO-Codes; die werden hier auf je einen typischen Code abgebildet, damit die
+Bar nur ein Format kennt.
+
+Der Nutzer wechselt als Berater staendig den Ort, ein fest
 eingetragener Standort waere also nicht nur ein Datenleck, sondern schlicht
 falsch.
 
@@ -53,9 +66,11 @@ Nutzers (gehoert nicht in ein oeffentliches Repo) oder schlicht gelogen.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
+from datetime import datetime
 
 CACHE_DIR = os.path.join(
     os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
@@ -63,6 +78,17 @@ CACHE_DIR = os.path.join(
 )
 LOCATION_CACHE = os.path.join(CACHE_DIR, "weather-location.json")
 WEATHER_CACHE = os.path.join(CACHE_DIR, "weather.json")
+# Eigene Datei: ein Open-Meteo-Stand im Cache hätte eine andere Form.
+WITTERUNG_CACHE = os.path.join(CACHE_DIR, "witterung.json")
+WITTERUNG_SERVICE = "dev.rubeen.witterung"
+
+# Witterung-Zustand -> typischer WMO-Code, siehe CONDITION in items/weather.lua.
+# Wind hat dort kein eigenes Symbol und fällt auf bedeckt.
+WITTERUNG_WMO = {
+    "clear": 0, "partly_cloudy": 2, "cloudy": 3, "fog": 45, "drizzle": 53,
+    "rain": 63, "heavy_rain": 65, "sleet": 66, "snow": 73, "thunderstorm": 95,
+    "hail": 96, "wind": 3,
+}
 
 # Ein Fix kostet einen WLAN-Scan von ein, zwei Sekunden -- billig genug fuer die
 # Haelfte des 15-Minuten-Takts der Bar, zu teuer fuer jeden Durchlauf. Den Fall,
@@ -132,14 +158,16 @@ FORECAST = (
 )
 
 
-def fetch(url, timeout=5):
+def fetch(url, timeout=5, header=None):
     """Harte Zeitgrenze pro Aufruf -- ein haengender Dienst darf die Bar nicht
     aufhalten, und sketchybar wartet auf das Ende dieses Prozesses."""
+    # Der Zusatz-Header geht per stdin an curl: als Argument stünde ein Token in `ps`.
+    config = 'header = "%s"\n' % header if header else ""
     try:
         out = subprocess.run(
             ["curl", "-fsS", "--max-time", str(timeout),
-             "-H", "Accept: application/json", url],
-            capture_output=True, text=True, timeout=timeout + 2,
+             "-H", "Accept: application/json", "--config", "-", url],
+            input=config, capture_output=True, text=True, timeout=timeout + 2,
         )
         return json.loads(out.stdout) if out.returncode == 0 else None
     except Exception:
@@ -319,9 +347,50 @@ def resolve_location(relocate=False):
     return cached
 
 
+def witterung_access():
+    """(Adresse, Token) aus dem Schlüsselbund, oder None ohne Eintrag."""
+    try:
+        out = subprocess.run(
+            ["/usr/bin/security", "find-generic-password", "-g",
+             "-s", WITTERUNG_SERVICE],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        return None
+    # -g schreibt die Attribute nach stdout und das Passwort nach stderr.
+    url = re.search(r'"acct"<blob>="(https?://[^"]+)"', out.stdout)
+    token = re.search(r'^password: "(wt_[A-Za-z0-9_-]+)"$', out.stderr, re.M)
+    if out.returncode != 0 or not url or not token:
+        return None
+    return url.group(1).rstrip("/"), token.group(1)
+
+
 def resolve_weather(location):
     """Wetter zum Standort, mit Cache. Rueckgabe auch dann, wenn es alt ist."""
-    cached = load_cache(WEATHER_CACHE)
+    access = witterung_access()
+    if access:
+        base, token = access
+        entry = cached_fetch(
+            location, WITTERUNG_CACHE,
+            "%s/api/v1/forecast?lat=%.2f&lon=%.2f" % (base, location["lat"], location["lon"]),
+            # Ein neuer Ort wird beim ersten Aufruf synchron abgefragt.
+            timeout=15, header="Authorization: Bearer " + token,
+            valid=lambda d: bool(d.get("hourly")),
+        )
+        src = "witterung"
+    else:
+        entry = cached_fetch(
+            location, WEATHER_CACHE, FORECAST % (location["lat"], location["lon"]),
+            timeout=6, header=None, valid=lambda d: bool(d.get("current")),
+        )
+        src = "open-meteo"
+    if entry:
+        entry["src"] = src
+    return entry
+
+
+def cached_fetch(location, path, url, timeout, header, valid):
+    cached = load_cache(path)
     # Ein Ortswechsel entwertet den Cache sofort, sonst zeigt die Bar nach der
     # Landung noch das Wetter des Abflughafens.
     same_place = bool(cached) and (
@@ -330,13 +399,68 @@ def resolve_weather(location):
     if same_place and time.time() - cached.get("at", 0) < WEATHER_TTL:
         return cached
 
-    data = fetch(FORECAST % (location["lat"], location["lon"]), timeout=6)
-    if isinstance(data, dict) and data.get("current"):
+    data = fetch(url, timeout=timeout, header=header)
+    if isinstance(data, dict) and valid(data):
         fresh = {"lat": location["lat"], "lon": location["lon"],
                  "at": time.time(), "data": data}
-        save_cache(WEATHER_CACHE, fresh)
+        save_cache(path, fresh)
         return fresh
     return cached if same_place else None
+
+
+def local_time(rfc3339):
+    """'2026-11-10T14:00:00Z' -> struct_time in der Zeitzone des Macs.
+    Python 3.9 (/usr/bin/python3) kennt kein 'Z' in fromisoformat."""
+    return datetime.fromisoformat(rfc3339.replace("Z", "+00:00")).astimezone().timetuple()
+
+
+def witterung_lines(data):
+    """Witterung-Vorhersage -> (W-Felder ohne Alter, D-Zeile oder None, H-Zeilen).
+    Was gilt, entscheidet wie in der Web-App: gemessen vor Prognose."""
+    now = data.get("now") or {}
+    obs = now.get("observed") or {}
+    hourly = data.get("hourly") or []
+    first = hourly[0] if hourly else {}
+    f = now.get("forecast") or first.get("consensus") or {}
+    temp = obs.get("temp_c") if obs.get("temp_c") is not None else f.get("temp_c")
+    if temp is None:
+        return None
+    cond = obs.get("condition") or f.get("condition")
+    wind = obs.get("wind_kmh") if obs.get("wind_kmh") is not None else f.get("wind_kmh")
+    rain = f.get("precip_prob_pct")
+    if rain is None:
+        rain = (first.get("spread") or {}).get("precip_agreement_pct")
+    feels = f.get("feels_like_c")
+
+    day = None
+    today = time.strftime("%Y-%m-%d")
+    for d in data.get("daily") or []:
+        c = d.get("consensus") or {}
+        if d.get("date") == today and c.get("sunrise") and c.get("sunset"):
+            day = (round(c["temp_max_c"]), round(c["temp_min_c"]),
+                   time.strftime("%H:%M", local_time(c["sunrise"])),
+                   time.strftime("%H:%M", local_time(c["sunset"])))
+            break
+
+    is_day = f.get("is_day")
+    if is_day is None and day:
+        is_day = day[2] <= time.strftime("%H:%M") < day[3]
+
+    current = (
+        WITTERUNG_WMO.get(cond, 3), 1 if is_day is None or is_day else 0,
+        round(temp), round(feels if feels is not None else temp),
+        round(wind or 0), round(rain or 0),
+    )
+    # hourly[0] ist die laufende Stunde; die Vorschau beginnt mit der nächsten.
+    hours = []
+    for h in hourly[1:4]:
+        c = h.get("consensus") or {}
+        if c.get("temp_c") is None:
+            continue
+        hours.append((time.strftime("%H", local_time(h["at"])),
+                      WITTERUNG_WMO.get(c.get("condition"), 3),
+                      round(c["temp_c"]), round(c.get("precip_prob_pct") or 0)))
+    return current, day, hours
 
 
 def hour_label(iso):
@@ -353,11 +477,26 @@ def main():
         return
 
     data = entry["data"]
+    age = max(0, int(time.time() - entry.get("at", 0)))
+    city = location.get("city") or ""
+    if entry["src"] == "witterung":
+        lines = witterung_lines(data)
+        if not lines:
+            return
+        current, day, hours = lines
+        print("W|%d|%d|%d|%d|%d|%d|%d" % (current + (age,)))
+        if city:
+            print("O|%s|%s" % (location.get("src") or "ip", city))
+        if day:
+            print("D|%d|%d|%s|%s" % day)
+        for h in hours:
+            print("H|%s|%d|%d|%d" % h)
+        return
+
     current = data.get("current") or {}
     if "temperature_2m" not in current:
         return
 
-    age = max(0, int(time.time() - entry.get("at", 0)))
     print("W|%d|%d|%d|%d|%d|%d|%d" % (
         current.get("weather_code", -1),
         current.get("is_day", 1),
@@ -371,7 +510,6 @@ def main():
     # Die Quelle steht mit in der Zeile: ein IP-Ort ist der Provider-Knoten und
     # kann Hunderte Kilometer danebenliegen. Die Bar kennzeichnet ihn deshalb
     # als ungefaehr, statt ihn wie eine Messung aussehen zu lassen.
-    city = location.get("city") or ""
     if city:
         print("O|%s|%s" % (location.get("src") or "ip", city))
 

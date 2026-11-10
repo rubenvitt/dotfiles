@@ -20,9 +20,11 @@ local media_cover = sbar.add("item", {
   icon = { drawing = false },
   drawing = false,
   updates = true,
+  -- Drei Knöpfe nebeneinander; Glas und Rahmen kommen aus default.lua.
   popup = {
     align = "center",
     horizontal = true,
+    height = 40,
   }
 })
 
@@ -58,24 +60,22 @@ local media_title = sbar.add("item", {
   },
 })
 
-sbar.add("item", {
-  position = "popup." .. media_cover.name,
-  icon = svg.icon("media.back", colors.white),
-  label = { drawing = false },
-  click_script = "nowplaying-cli previous",
-})
-sbar.add("item", {
-  position = "popup." .. media_cover.name,
-  icon = svg.icon("media.play_pause", colors.white),
-  label = { drawing = false },
-  click_script = "nowplaying-cli togglePlayPause",
-})
-sbar.add("item", {
-  position = "popup." .. media_cover.name,
-  icon = svg.icon("media.forward", colors.white),
-  label = { drawing = false },
-  click_script = "nowplaying-cli next",
-})
+-- Knopf ohne Rahmen: im Popup trägt das Glas die Fläche.
+local function media_button(name, click_script)
+  sbar.add("item", {
+    position = "popup." .. media_cover.name,
+    padding_left = 8,
+    padding_right = 8,
+    icon = svg.icon("media." .. name, colors.white, { padding_left = 10, padding_right = 10 }),
+    label = { drawing = false },
+    background = { drawing = false },
+    click_script = click_script,
+  })
+end
+
+media_button("back", "nowplaying-cli previous")
+media_button("play_pause", "nowplaying-cli togglePlayPause")
+media_button("forward", "nowplaying-cli next")
 
 local interrupt = 0
 local function animate_detail(detail)

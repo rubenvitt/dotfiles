@@ -2,6 +2,7 @@ local colors = require("colors")
 local settings = require("settings")
 local icons = require("icons")
 local svg = require("helpers.svg_icon")
+local popup = require("helpers.popup")
 
 -- Privacy-Insel. Bei ausgeblendeter Menüleiste zeichnet macOS seinen
 -- Privacy-Punkt (Mikrofon, Kamera, Bildschirm, Systemaudio) über die Bar.
@@ -76,7 +77,7 @@ local cap = sbar.add("item", "privacy", {
   -- Ohne sichtbaren Inhalt hätte das Item kein Fenster und die Klammer
   -- keine Breite.
   background = { color = colors.transparent, height = CAP, border_width = 0 },
-  popup = { align = "right", height = 28 },
+  popup = popup.host("right"),
 })
 
 local pill_items = { cap }
@@ -188,36 +189,16 @@ local pill = sbar.add("bracket", "privacy.pill", member_names, {
 -- Popup: Kopfzeile, eine Zeile je App, Hinweis bei fehlender Zuordnung.
 local popup_pos = "popup." .. cap.name
 
-sbar.add("item", "privacy.popup.header", {
-  position = popup_pos,
-  width = POPUP_WIDTH,
-  icon = svg.icon("privacy.unknown", colors.white, {
-    font = { style = settings.font.style_map["Bold"], size = 14.0 },
-  }),
-  label = {
-    string = "Sensorzugriffe",
-    font = { style = settings.font.style_map["Bold"], size = 14.0 },
-  },
-  background = { height = 2, color = colors.grey, y_offset = -15 },
-})
+popup.gap(cap.name, "privacy.popup.gap.top", 6, { drawing = true })
+popup.header(cap.name, "privacy.popup.header", { drawing = true })
+  :set({ icon = { string = "Sensorzugriffe" } })
+popup.rule(cap.name, "privacy.popup.rule", { drawing = true })
 
 local rows = {}
 local row_kind = {}
 for i = 1, POPUP_ROWS do
-  rows[i] = sbar.add("item", "privacy.popup.row" .. i, {
-    position = popup_pos,
-    drawing = false,
-    icon = {
-      width = 130,
-      align = "left",
-      font = { style = settings.font.style_map["Semibold"], size = 13.0 },
-    },
-    label = {
-      width = POPUP_WIDTH - 130,
-      align = "right",
-      max_chars = 26,
-    },
-  })
+  rows[i] = popup.row(cap.name, "privacy.popup.row" .. i, { caption_width = 130 })
+  rows[i]:set({ label = { max_chars = 26 } })
   -- Klick auf eine Zeile öffnet die passende Datenschutz-Einstellung.
   rows[i]:subscribe("mouse.clicked", function()
     local kind = row_kind[i]
@@ -227,17 +208,11 @@ for i = 1, POPUP_ROWS do
   end)
 end
 
-local note = sbar.add("item", "privacy.popup.note", {
-  position = popup_pos,
-  drawing = false,
-  width = POPUP_WIDTH,
-  icon = { drawing = false },
-  label = {
-    color = colors.grey,
-    max_chars = 40,
-    font = { size = 12.0 },
-  },
+local note = popup.row(cap.name, "privacy.popup.note", {
+  caption_width = POPUP_WIDTH - 2 * popup.INSET,
+  caption_font = popup.font("Regular", 12.0),
 })
+popup.gap(cap.name, "privacy.popup.gap.bottom", 6, { drawing = true })
 
 -- Bundle-ID → Anzeigename und Icon-Quelle. mdfind läuft asynchron über
 -- sbar.exec (io.popen hängt nach dem ersten Fork, siehe system_info.lua).
@@ -448,7 +423,7 @@ local function render_popup()
   elseif n > POPUP_ROWS then
     text = "… und " .. (n - POPUP_ROWS) .. " weitere"
   end
-  note:set({ drawing = text ~= nil, label = { string = text or "" } })
+  note:set({ drawing = text ~= nil, icon = { string = text or "" } })
 end
 
 cap:subscribe("privacy_indicator_change", function(env)

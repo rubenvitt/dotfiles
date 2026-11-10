@@ -2,6 +2,7 @@ local icons = require("icons")
 local svg = require("helpers.svg_icon")
 local colors = require("colors")
 local settings = require("settings")
+local popup = require("helpers.popup")
 
 -- Beide Binaries werden absolut adressiert: sketchybar startet unter launchd,
 -- dessen PATH kennt weder /usr/local/bin noch /opt/homebrew/bin. Ohne das
@@ -10,7 +11,7 @@ local TAILSCALE = "/usr/local/bin/tailscale"
 local JQ = "/opt/homebrew/bin/jq"
 
 local UPDATE_FREQ = 15
-local POPUP_WIDTH = 250
+local POPUP_WIDTH = popup.WIDTH
 
 -- Feste Anzahl Popup-Zeilen fuer die Exit-Node-Kandidaten. Items zur Laufzeit
 -- anzulegen und wieder wegzuraeumen ist in SbarLua fragil, drawing umschalten
@@ -77,7 +78,7 @@ local tailscale = sbar.add("item", "widgets.tailscale", {
 local bracket = sbar.add("bracket", "widgets.tailscale.bracket", { tailscale.name }, {
   display = settings.primary_display,
   background = { color = colors.bg1 },
-  popup = { align = "center", height = 30 },
+  popup = popup.host("center"),
 })
 
 sbar.add("item", {
@@ -85,61 +86,53 @@ sbar.add("item", {
 
 -- Popup-Zeilen entstehen in Anzeigereihenfolge: sketchybar zeichnet sie so,
 -- wie sie hinzugefuegt wurden.
-local tailnet = sbar.add("item", "widgets.tailscale.tailnet", {
-  position = "popup." .. bracket.name,
-  width = POPUP_WIDTH,
-  align = "center",
-  icon = svg.icon("tailscale.connected", colors.white, { font = { style = settings.font.style_map["Bold"] } }),
-  label = {
-    string = "————",
-    max_chars = 24,
-    font = { size = 15, style = settings.font.style_map["Bold"] },
-  },
-  background = { height = 2, color = colors.grey, y_offset = -15 },
-})
+-- Im Stil der Systemmenüs (helpers/popup.lua): Kopf mit Verbindungsschalter,
+-- Details, darunter die Exit-Node-Auswahl.
+local P = bracket.name
+local CAPTION = 134
+local VALUE = POPUP_WIDTH - 2 * popup.INSET - CAPTION
 
-local function add_row(key, title)
-  return sbar.add("item", "widgets.tailscale." .. key, {
-    position = "popup." .. bracket.name,
-    icon = { align = "left", string = title, width = POPUP_WIDTH / 2 },
-    label = { align = "right", string = "—", width = POPUP_WIDTH / 2, max_chars = 20 },
-  })
+local function add_row(key, title, opts)
+  local o = { width = POPUP_WIDTH, caption_width = CAPTION, drawing = true }
+  for k, v in pairs(opts or {}) do o[k] = v end
+  local row = popup.row(P, "widgets.tailscale." .. key, o)
+  row:set({ icon = { string = title }, label = { string = "—", max_chars = 20 } })
+  return row
 end
 
-local status_row = add_row("status", "Status:")
-local ip_row = add_row("ip", "IP:")
-local peers_row = add_row("peers", "Peers:")
-local power_row = add_row("power", "Verbindung:")
-
-local exit_header = sbar.add("item", "widgets.tailscale.exit_header", {
-  position = "popup." .. bracket.name,
+popup.gap(P, "widgets.tailscale.gap.top", 6, { width = POPUP_WIDTH, drawing = true })
+local power_row = popup.header(P, "widgets.tailscale.power", {
   width = POPUP_WIDTH,
-  align = "center",
-  icon = { drawing = false },
-  label = { string = "Exit-Node", align = "center", font = { style = settings.font.style_map["Bold"] } },
-  background = { height = 2, color = colors.grey, y_offset = -15 },
+  caption_width = CAPTION,
+  drawing = true,
 })
+power_row:set({ icon = { string = "Tailscale" } })
+popup.rule(P, "widgets.tailscale.rule.details", { width = POPUP_WIDTH, drawing = true })
+local tailnet = add_row("tailnet", "Tailnet")
+local status_row = add_row("status", "Status")
+local ip_row = add_row("ip", "IP-Adresse")
+local peers_row = add_row("peers", "Peers")
 
-local exit_off = sbar.add("item", "widgets.tailscale.exit_off", {
-  position = "popup." .. bracket.name,
-  icon = { align = "left", string = "Keiner", width = POPUP_WIDTH / 2 },
-  label = { align = "right", string = "", width = POPUP_WIDTH / 2 },
-})
+local exit_rule = popup.rule(P, "widgets.tailscale.rule.exit", { width = POPUP_WIDTH })
+local exit_header = popup.section(P, "widgets.tailscale.exit_header", { width = POPUP_WIDTH })
+exit_header:set({ icon = { string = "Exit-Node" } })
+local exit_off = add_row("exit_off", "Keiner", { drawing = false, caption_color = colors.white })
+exit_off:set({ label = { string = "" } })
 
 local exit_slots = {}
 for i = 1, MAX_EXIT_NODES do
-  exit_slots[i] = sbar.add("item", "widgets.tailscale.exit_" .. i, {
-    position = "popup." .. bracket.name,
-    drawing = false,
-    icon = { align = "left", string = "", width = POPUP_WIDTH / 2, max_chars = 18 },
-    label = { align = "right", string = "", width = POPUP_WIDTH / 2 },
-  })
+  exit_slots[i] = add_row("exit_" .. i, "", { drawing = false })
+  exit_slots[i]:set({ icon = { max_chars = 18 } })
 end
+popup.gap(P, "widgets.tailscale.gap.bottom", 6, { width = POPUP_WIDTH, drawing = true })
 
 -- Schalter in der rechten Popup-Spalte.
 local function switch(on)
   local name = on and "switch.on" or "switch.off"
-  return svg.align_right(svg.icon(name, on and colors.green or colors.grey), name, POPUP_WIDTH / 2, 8)
+  return svg.align_right(svg.icon(name, on and colors.green or colors.grey, {
+    width = VALUE + popup.INSET,
+    align = "right",
+  }), name, VALUE + popup.INSET, popup.INSET)
 end
 
 local function apply(s, nodes)
@@ -177,10 +170,7 @@ local function apply(s, nodes)
     },
   })
 
-  tailnet:set({
-    icon = svg.icon(icon_str, color),
-    label = tailnet_id ~= "" and tailnet_id or "Tailscale",
-  })
+  tailnet:set({ label = tailnet_id ~= "" and tailnet_id or "—" })
   local known = (backend ~= "" and backend ~= "?")
   status_row:set({ label = { string = STATE_LABELS[backend] or (known and backend) or "unbekannt", color = color } })
   ip_row:set({ label = self_ip ~= "" and self_ip or "—" })
@@ -190,6 +180,7 @@ local function apply(s, nodes)
   })
 
   -- Exit-Node-Auswahl ergibt nur Sinn, solange die Verbindung steht.
+  exit_rule:set({ drawing = state.running })
   exit_header:set({ drawing = state.running })
   exit_off:set({
     drawing = state.running,

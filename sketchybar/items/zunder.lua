@@ -1,6 +1,7 @@
 local colors = require("colors")
 local svg = require("helpers.svg_icon")
 local settings = require("settings")
+local popup = require("helpers.popup")
 
 -- Fällige Zunder-Aufgaben in der Bar, die Liste im Popup.
 --
@@ -27,15 +28,10 @@ local settings = require("settings")
 local PROBE = "/usr/bin/python3 $CONFIG_DIR/helpers/zunder_probe.py"
 local MAX_ROWS = 8
 
--- Wie in items/weather.lua: die Vorgaben der Bar (13pt, 40 Punkt Zeilenhöhe)
--- erzeugen in einer Liste vor allem Leerraum.
-local ROW_FONT = 11.0
-local ROW_HEIGHT = 20
-local ROW_PAD = 7
--- Zwei feste Spalten je Zeile: nur so stehen die Fälligkeiten untereinander.
--- Die Breite passt zu den 34 Zeichen, auf die der Helfer kürzt.
+-- Zwei feste Spalten je Zeile (helpers/popup.lua): nur so stehen die
+-- Fälligkeiten untereinander. Die Titelspalte passt zu den 34 Zeichen, auf
+-- die der Helfer kürzt.
 local TITLE_WIDTH = 200
-local DUE_WIDTH = 62
 
 -- Fälligkeiten stehen tage- oder minutengenau fest; niemand muss von der
 -- Menüleiste erfahren, dass eine Aufgabe seit dreißig Sekunden fällig ist.
@@ -66,42 +62,30 @@ local zunder = sbar.add("item", "zunder", {
     color = colors.grey,
   },
   update_freq = UPDATE_FREQ,
-  popup = {
-    align = "right",
-    height = ROW_HEIGHT,
-  },
+  popup = popup.host("right"),
   click_script = "sketchybar --set zunder popup.drawing=toggle",
 })
+
+popup.gap("zunder", "zunder.gap.top", 6, { drawing = true })
+local header = popup.header("zunder", "zunder.header", { drawing = true })
+header:set({ icon = { string = "Zunder" } })
+popup.rule("zunder", "zunder.rule.tasks", { drawing = true })
 
 -- Feste Reserve statt neuer Items je Durchlauf (siehe items/menus.lua).
 -- Eine Popup-Zeile ist ein Item: der Titel steht im icon-Feld, die
 -- Fälligkeit im label -- zwei Items je Zeile wären zwei Zeilen.
 local rows = {}
 for i = 1, MAX_ROWS do
-  rows[i] = sbar.add("item", "zunder.task." .. i, {
-    position = "popup.zunder",
-    drawing = false,
-    padding_left = ROW_PAD,
-    padding_right = ROW_PAD,
-    icon = {
-      string = "",
-      width = TITLE_WIDTH,
-      align = "left",
-      padding_left = ROW_PAD,
-      padding_right = 0,
-      color = colors.white,
-      font = { family = settings.font.text, size = ROW_FONT },
-    },
-    label = {
-      string = "",
-      width = DUE_WIDTH,
-      align = "right",
-      padding_left = 0,
-      padding_right = ROW_PAD,
-      font = { family = settings.font.numbers, size = ROW_FONT },
-    },
+  rows[i] = popup.row("zunder", "zunder.task." .. i, {
+    caption_width = TITLE_WIDTH,
+    caption_color = colors.white,
   })
 end
+
+popup.rule("zunder", "zunder.rule.open", { drawing = true })
+popup.action("zunder", "zunder.open", "Zunder öffnen",
+  "open 'https://zunder.rubeen.dev'; sketchybar --set zunder popup.drawing=off")
+popup.gap("zunder", "zunder.gap.bottom", 6, { drawing = true })
 
 -- Wie viele Abrufe hintereinander misslungen sind. Ein einzelner Fehler darf
 -- den Stand stehen lassen; hält er an -- widerrufener Token, dauerhaft kein
@@ -151,6 +135,11 @@ local function update()
       label = "+" .. late
       color = colors.grey
     end
+
+    local parts = {}
+    if today > 0 then parts[#parts + 1] = today .. " heute" end
+    if late > 0 then parts[#parts + 1] = late .. " überfällig" end
+    header:set({ label = { string = table.concat(parts, " · ") } })
 
     zunder:set({
       drawing = (today + late) > 0,

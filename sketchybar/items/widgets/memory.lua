@@ -2,6 +2,7 @@ local colors = require("colors")
 local icons = require("icons")
 local svg = require("helpers.svg_icon")
 local settings = require("settings")
+local popup = require("helpers.popup")
 
 -- Speicherdruck und freier Plattenplatz, zweizeilig und bewusst leise: beides
 -- sind Zahlen, die man selten braucht und nie übersehen will, wenn sie kippen.
@@ -16,13 +17,11 @@ local settings = require("settings")
 -- Punkt auseinander. sysctl kern.memorystatus_vm_pressure_level scheidet aus:
 -- es kennt nur 1/2/4 und stand bei 40 % Druck unverändert auf 1.
 
-local ROW_FONT = 11.0
--- Zeilenhöhe kommt von popup.height am Eltern-Item; background.height allein
--- ließe jede Zeile die Bar-Höhe von 40 Punkt erben. Siehe items/weather.lua.
-local ROW_HEIGHT = 20
-local ROW_PAD = 7
-local NAME_WIDTH = 160
-local VALUE_WIDTH = 92
+-- Popup im Stil der Systemmenüs (helpers/popup.lua). Prozessnamen werden
+-- gekürzt: ein "Microsoft Teams WebView Helper (Renderer)" liefe sonst in die
+-- Zahlenspalte.
+local NAME_WIDTH = 190
+local NAME_CHARS = 26
 local PROC_ROWS = 4
 
 -- LC_ALL=C muss an jedem awk hängen, nicht nur am ersten Kommando der Pipe:
@@ -139,7 +138,7 @@ local bracket = sbar.add("bracket", "widgets.memory.bracket", {
 }, {
   display = settings.primary_display,
   background = { color = colors.bg1 },
-  popup = { align = "center", height = ROW_HEIGHT },
+  popup = popup.host("center"),
 })
 
 sbar.add("item", "widgets.memory.group_padding", {
@@ -149,42 +148,37 @@ sbar.add("item", "widgets.memory.group_padding", {
 })
 
 -- Feste Reserve statt Items im Callback: sonst legt jeder Durchlauf neue an.
-local function popup_row(name)
-  return sbar.add("item", name, {
-    position = "popup." .. bracket.name,
-    padding_left = ROW_PAD,
-    padding_right = ROW_PAD,
-    icon = {
-      string = "",
-      width = NAME_WIDTH,
-      align = "left",
-      color = colors.grey,
-      padding_left = ROW_PAD,
-      padding_right = 0,
-      font = { family = settings.font.text, size = ROW_FONT },
-    },
-    label = {
-      string = "",
-      width = VALUE_WIDTH,
-      align = "right",
-      padding_left = 0,
-      padding_right = ROW_PAD,
-      font = { family = settings.font.numbers, size = ROW_FONT },
-    },
-  })
+local P = bracket.name
+local function popup_row(name, opts)
+  local o = { caption_width = NAME_WIDTH }
+  for k, v in pairs(opts or {}) do o[k] = v end
+  return popup.row(P, name, o)
 end
+
+popup.gap(P, "widgets.memory.gap.top", 6, { drawing = true })
+local header = popup.header(P, "widgets.memory.header", { drawing = true })
+header:set({ icon = { string = "Speicher" } })
+popup.rule(P, "widgets.memory.rule.procs", { drawing = true })
+popup.section(P, "widgets.memory.section", { drawing = true })
+  :set({ icon = { string = "Größter Speicherbedarf" } })
 
 local proc_rows = {}
 for i = 1, PROC_ROWS do
-  proc_rows[i] = popup_row("widgets.memory.proc." .. i)
-  proc_rows[i]:set({ drawing = false })
+  proc_rows[i] = popup_row("widgets.memory.proc." .. i, { caption_color = colors.white })
+  proc_rows[i]:set({ icon = { max_chars = NAME_CHARS } })
 end
 
-local ram_row = popup_row("widgets.memory.total.ram")
+popup.rule(P, "widgets.memory.rule.totals", { drawing = true })
+local ram_row = popup_row("widgets.memory.total.ram", { drawing = true })
 ram_row:set({ icon = { string = "RAM belegt / gesamt" } })
 
-local disk_row = popup_row("widgets.memory.total.disk")
+local disk_row = popup_row("widgets.memory.total.disk", { drawing = true })
 disk_row:set({ icon = { string = "Platte belegt / frei" } })
+
+popup.rule(P, "widgets.memory.rule.open", { drawing = true })
+popup.action(P, "widgets.memory.open", "Aktivitätsanzeige öffnen",
+  "open -a 'Activity Monitor'; sketchybar --set " .. P .. " popup.drawing=off")
+popup.gap(P, "widgets.memory.gap.bottom", 6, { drawing = true })
 
 local function update_ram()
   sbar.exec(RAM_CMD, function(out)
@@ -196,6 +190,7 @@ local function update_ram()
       label = { string = percent .. "%", color = pressure_color(percent) },
     })
     ram_row:set({ label = { string = used .. " / " .. total .. " G" } })
+    header:set({ label = { string = "Druck " .. percent .. " %" } })
   end)
 end
 

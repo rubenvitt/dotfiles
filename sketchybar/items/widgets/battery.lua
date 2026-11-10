@@ -1,6 +1,7 @@
 local svg = require("helpers.svg_icon")
 local colors = require("colors")
 local settings = require("settings")
+local popup = require("helpers.popup")
 
 -- Off the charger the battery widget blinks in two stages: slow and orange
 -- as an early warning, fast and red when it is nearly empty.
@@ -23,22 +24,24 @@ local battery = sbar.add("item", "widgets.battery", {
   },
   label = { font = { family = settings.font.numbers } },
   update_freq = 180,
-  popup = { align = "center" }
+  popup = popup.host("center"),
 })
 
-local remaining_time = sbar.add("item", {
-  position = "popup." .. battery.name,
-  icon = {
-    string = "Time remaining:",
-    width = 100,
-    align = "left"
-  },
-  label = {
-    string = "??:??h",
-    width = 100,
-    align = "right"
-  },
-})
+-- Popup wie das Akkumenü von macOS (helpers/popup.lua).
+local P = battery.name
+popup.gap(P, "widgets.battery.gap.top", 6, { drawing = true })
+local header = popup.header(P, "widgets.battery.header", { drawing = true })
+header:set({ icon = { string = "Akku" } })
+popup.rule(P, "widgets.battery.rule.state", { drawing = true })
+local source_row = popup.row(P, "widgets.battery.source", { drawing = true })
+source_row:set({ icon = { string = "Stromquelle" } })
+local remaining_time = popup.row(P, "widgets.battery.remaining", { drawing = true })
+remaining_time:set({ icon = { string = "Restzeit" }, label = { string = "…" } })
+popup.rule(P, "widgets.battery.rule.settings", { drawing = true })
+popup.action(P, "widgets.battery.settings", "Batterieeinstellungen …",
+  "open 'x-apple.systempreferences:com.apple.Battery-Settings.extension'; " ..
+  "sketchybar --set " .. P .. " popup.drawing=off")
+popup.gap(P, "widgets.battery.gap.bottom", 6, { drawing = true })
 
 local bracket = sbar.add("bracket", "widgets.battery.bracket", { battery.name }, {
   display = settings.primary_display,
@@ -157,9 +160,17 @@ battery:subscribe("mouse.clicked", function(env)
 
   if drawing == "off" then
     sbar.exec("pmset -g batt", function(batt_info)
-      local found, _, remaining = batt_info:find(" (%d+:%d+) remaining")
-      local label = found and remaining .. "h" or "No estimate"
-      remaining_time:set( { label = label })
+      local charge = batt_info:match("(%d+)%%")
+      local remaining = batt_info:match(" (%d+:%d+) remaining")
+      local on_ac = batt_info:find("AC Power") ~= nil
+      header:set({ label = { string = charge and (charge .. " %") or "" } })
+      source_row:set({ label = { string = on_ac and "Netzteil" or "Akku" } })
+      -- 0:00 meldet pmset, solange es noch rechnet.
+      remaining_time:set({
+        drawing = not on_ac or (remaining ~= nil and remaining ~= "0:00"),
+        icon = { string = on_ac and "Bis voll" or "Restzeit" },
+        label = { string = (remaining and remaining ~= "0:00") and (remaining .. " h") or "wird berechnet" },
+      })
     end)
   end
 end)

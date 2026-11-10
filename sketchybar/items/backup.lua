@@ -2,6 +2,7 @@ local colors = require("colors")
 local icons = require("icons")
 local svg = require("helpers.svg_icon")
 local settings = require("settings")
+local popup = require("helpers.popup")
 
 -- Anzeige für das Kopia-Backup. Zwei Dinge stehen dahinter: der stündliche
 -- lokale Snapshot (launchd/kopia-snapshot.sh) und der Offsite-Spiegel auf die
@@ -52,13 +53,11 @@ local OFF_CRIT_DAYS = 30
 local UPDATE_FREQ = 300
 local UPDATE_FREQ_RUNNING = 15
 
--- Kompaktes Popup-Raster: die Bar-Defaults (13pt, 28px) erzeugen in
--- einer Liste aus mehreren Zeilen viel Leerraum.
-local ROW_FONT = 11.0
-local ROW_HEIGHT = 20
-local ROW_PAD = 7
-local CAPTION_WIDTH = 112
-local MAX_TEXT_CHARS = 52
+-- Popup im Stil der Systemmenüs (helpers/popup.lua). Die Fehlermeldung
+-- bekommt eine eigene Zeile über die volle Breite; dafür ist sie gekürzt.
+local WIDTH = 360
+local CAPTION_WIDTH = 120
+local MAX_TEXT_CHARS = 48
 
 -- Ein Wert pro Zeile als key=value: die Fortschrittszeile von kopia enthält
 -- Leerzeichen und Sonderzeichen, für ein Trennzeichen wäre sie zu unberechenbar.
@@ -150,52 +149,54 @@ local backup = sbar.add("item", "backup", {
     color = colors.yellow,
   },
   update_freq = UPDATE_FREQ,
-  popup = {
-    align = "right",
-    height = ROW_HEIGHT,
-  },
+  popup = popup.host("right"),
   click_script = "sketchybar --set backup popup.drawing=toggle",
 })
 
 -- Zeilen einmalig anlegen: im Update-Callback erzeugt jeder Durchlauf neue
 -- Items (siehe items/menus.lua).
-local function popup_row(name, caption)
-  return sbar.add("item", "backup." .. name, {
-    position = "popup.backup",
-    padding_left = ROW_PAD,
-    padding_right = ROW_PAD,
-    icon = {
-      string = caption,
-      width = CAPTION_WIDTH,
-      align = "left",
-      color = colors.grey,
-      padding_left = ROW_PAD,
-      padding_right = 0,
-      font = { family = settings.font.text, size = ROW_FONT },
-    },
-    label = {
-      string = "",
-      align = "left",
-      padding_left = 0,
-      padding_right = ROW_PAD,
-      font = { family = settings.font.text, size = ROW_FONT },
-    },
-  })
+local function popup_row(name, caption, opts)
+  local o = { width = WIDTH, caption_width = CAPTION_WIDTH, drawing = true }
+  for k, v in pairs(opts or {}) do o[k] = v end
+  local item = popup.row("backup", "backup." .. name, o)
+  item:set({ icon = { string = caption } })
+  return item
 end
 
+local function popup_rule(name, drawing)
+  return popup.rule("backup", "backup.rule." .. name, { width = WIDTH, drawing = drawing ~= false })
+end
+
+popup.gap("backup", "backup.gap.top", 6, { width = WIDTH, drawing = true })
+popup_row("header", "Backup", {
+  caption_color = colors.white,
+  caption_font = popup.font("Bold", 14.0),
+  height = 30,
+})
+popup_rule("local")
 local row_snapshot = popup_row("snapshot", "Letzter Snapshot")
 local row_disk = popup_row("disk", "Platte")
+popup_rule("offsite")
 local row_offsite = popup_row("offsite", "Offsite")
 local row_offsite_age = popup_row("offsiteage", "Letzte Kopie")
-local row_error = popup_row("error", "Letzter Fehler")
-local row_log = popup_row("log", "Log öffnen")
+local rule_error = popup_rule("error", false)
+local row_error = popup_row("error", "Letzter Fehler", { drawing = false })
+-- Die Meldung selbst: eine Zeile über die volle Breite, gedämpft.
+local row_error_text = popup_row("errortext", "", {
+  drawing = false,
+  caption_width = WIDTH - 2 * popup.INSET,
+  caption_font = popup.font("Regular", 12.0),
+})
+popup_rule("log")
+local row_log = popup_row("log", "Log öffnen", { caption_color = colors.white })
+popup.gap("backup", "backup.gap.bottom", 6, { width = WIDTH, drawing = true })
 
 -- Im click_script darf der Monat als Shell-Einsetzung stehen -- der Klick geht
 -- durch eine Shell und trifft damit auch nach einem Monatswechsel das richtige
 -- Log. Die Beschriftung nicht: Label-Werte gehen unausgewertet an sketchybar,
 -- sie wird in apply() gesetzt.
 row_log:set({
-  label = { color = colors.grey },
+  label = { color = colors.popup.caption },
   click_script = 'open "$HOME/Library/Logs/kopia/snapshot-$(date +%Y-%m).log"; ' ..
     "sketchybar --set backup popup.drawing=off",
 })
@@ -207,10 +208,7 @@ local function format_error(line)
   local stamp, message = string.match(line, "^%[(%d+%-%d+%-%d+ %d+:%d+):%d+%] (.*)$")
   local text = string.gsub(message or line, "^error:%s*", "")
   local month, dom, time = string.match(stamp or "", "%d+%-(%d+)%-(%d+) (%d+:%d+)")
-  if month then
-    return dom .. "." .. month .. ". " .. time .. " · " .. truncate(text)
-  end
-  return truncate(text)
+  return month and (dom .. "." .. month .. ". " .. time) or "", truncate(text)
 end
 
 -- Zustand des Spiegels als Satz und Farbe. "unterbrochen" ist bewusst nicht
@@ -283,10 +281,13 @@ local function apply(out)
   })
 
   local err = string.match(f.err or "", "^%s*(.-)%s*$")
+  local err_when, err_text = format_error(err)
+  rule_error:set({ drawing = err ~= "" })
   row_error:set({
     drawing = err ~= "",
-    label = { string = err ~= "" and format_error(err) or "", color = colors.grey },
+    label = { string = err_when, color = colors.popup.caption },
   })
+  row_error_text:set({ drawing = err ~= "", icon = { string = err_text } })
 
   row_log:set({ label = { string = os.date("snapshot-%Y-%m.log") } })
 

@@ -1,4 +1,5 @@
 local settings = require("settings")
+local popup = require("helpers.popup")
 local colors = require("colors")
 local icons = require("icons")
 local svg = require("helpers.svg_icon")
@@ -176,58 +177,43 @@ sbar.add("item", { position = "right", width = settings.group_paddings })
 
 local popup_pos = "popup." .. cal.name
 
-local header = sbar.add("item", "clock.header", {
-  position = popup_pos,
+-- Zeilen im Stil der Systemmenüs (helpers/popup.lua). popup.height bleibt
+-- hier CELL: das Monatsraster braucht die Zeilenhöhe, und die Haarlinien
+-- bekommen so ihren Abstand.
+local function rule(name)
+  popup.rule(cal.name, "clock.rule." .. name, { width = POPUP_WIDTH, drawing = true })
+end
+
+local header = popup.header(cal.name, "clock.header", {
   width = POPUP_WIDTH,
-  icon = svg.icon("clock.calendar", colors.white, {
-    font = { style = settings.font.style_map["Bold"], size = 14.0 },
-  }),
-  label = {
-    font = { style = settings.font.style_map["Bold"], size = 14.0 },
-  },
-  background = { height = 2, color = colors.grey, y_offset = -(CELL / 2 + 2) },
+  caption_width = POPUP_WIDTH - 2 * popup.INSET,
+  drawing = true,
 })
+rule("next")
 
 local function info_row(name, title, mono)
-  return sbar.add("item", name, {
-    position = popup_pos,
-    icon = {
-      string = title,
-      width = POPUP_WIDTH / 2,
-      align = "left",
-      color = colors.grey,
-      font = { style = settings.font.style_map["Semibold"], size = 13.0 },
-    },
-    label = {
-      width = POPUP_WIDTH / 2,
-      align = "right",
-      font = mono and { family = settings.font.numbers, style = settings.font.style_map["Bold"], size = 13.0 }
-        or { style = settings.font.style_map["Semibold"], size = 13.0 },
-    },
+  local row = popup.row(cal.name, name, {
+    width = POPUP_WIDTH,
+    drawing = true,
+    value_font = mono and { family = settings.font.numbers, style = "Regular", size = popup.FONT_SIZE },
   })
+  row:set({ icon = { string = title } })
+  return row
 end
 
 -- Nächster Termin: Titel links, Beginn rechts; ohne Termin ausgeblendet.
-local next_row = sbar.add("item", "clock.next.row", {
-  position = popup_pos,
-  drawing = false,
-  icon = {
-    width = POPUP_WIDTH - 60,
-    align = "left",
-    max_chars = 30,
-    font = { style = settings.font.style_map["Semibold"], size = 13.0 },
-  },
-  label = {
-    width = 60,
-    align = "right",
-    font = { family = settings.font.numbers, style = settings.font.style_map["Bold"], size = 13.0 },
-  },
+local next_row = popup.row(cal.name, "clock.next.row", {
+  width = POPUP_WIDTH,
+  caption_width = POPUP_WIDTH - 2 * popup.INSET - 60,
+  caption_color = colors.white,
 })
+next_row:set({ icon = { max_chars = 30 } })
 
 local week_row = info_row("clock.week", "Kalenderwoche")
 local day_row = info_row("clock.day", "Tag im Jahr")
 local dtg_row = info_row("clock.dtg", "DTG", true)
 local zulu_row = info_row("clock.zulu", "DTG Zulu", true)
+rule("grid")
 
 -- Monatskalender in SF Mono: Spalte KW im Icon, sieben Tage im Label.
 local grid_font = { family = settings.font.numbers, style = settings.font.style_map["Regular"], size = 13.0 }
@@ -239,7 +225,7 @@ local function grid_item(name, props)
     icon = {
       width = GRID_KW_WIDTH,
       align = "left",
-      color = colors.grey,
+      color = colors.popup.caption,
       padding_left = 8,
       padding_right = 0,   -- bei fester Breite ohne Wirkung, Abstand im Label
       font = grid_font,
@@ -272,7 +258,7 @@ end
 
 grid_item("clock.grid.head", {
   icon = { string = "KW" },
-  label = { string = "Mo Di Mi Do Fr Sa So", color = colors.grey },
+  label = { string = "Mo Di Mi Do Fr Sa So", color = colors.popup.caption },
 })
 
 local grid = {}
@@ -291,7 +277,7 @@ local function render_popup()
   local days_in_year = os.date("*t", os.time({ year = t.year, month = 12, day = 31, hour = 12 })).yday
 
   header:set({
-    label = string.format("%s, %d. %s %d", WEEKDAYS[t.wday], t.day, MONTHS[t.month], t.year),
+    icon = string.format("%s, %d. %s %d", WEEKDAYS[t.wday], t.day, MONTHS[t.month], t.year),
   })
   week_row:set({ label = "KW " .. tonumber(os.date("%V", now)) })
   day_row:set({ label = string.format("%d von %d", t.yday, days_in_year) })
@@ -327,7 +313,7 @@ local function render_popup()
         drawing = true,
         icon = {
           string = tostring(tonumber(os.date("%V", monday))),
-          color = current and colors.orange or colors.grey,
+          color = current and colors.orange or colors.popup.caption,
           background = {
             drawing = current,
             -- Von der Mitte des KW-Felds zur Mitte der heutigen Zelle

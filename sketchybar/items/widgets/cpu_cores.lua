@@ -2,6 +2,7 @@ local colors = require("colors")
 local icons = require("icons")
 local svg = require("helpers.svg_icon")
 local settings = require("settings")
+local popup = require("helpers.popup")
 
 -- Auslastung je CPU-Kern als Balkenreihe (wie die Kern-Ansicht in iStat Menus).
 -- Datenquelle ist der Event-Provider cpu_cores, der host_processor_info()
@@ -58,13 +59,10 @@ local function color_for(load)
   return EMPTY_COLOR
 end
 
--- Popup: die fünf Prozesse mit der höchsten CPU-Last. Kompaktes Raster wie in
--- items/weather.lua, sonst erbt jede Zeile die Bar-Höhe von 40 Punkt.
-local ROW_FONT = 11.0
-local ROW_HEIGHT = 20
-local ROW_PAD = 7
-local NAME_WIDTH = 152
-local VALUE_WIDTH = 54
+-- Popup: Verlauf und die fünf Prozesse mit der höchsten CPU-Last, im Stil
+-- der Systemmenüs (helpers/popup.lua).
+local NAME_WIDTH = 200
+local NAME_CHARS = 28
 local TOP_ROWS = 5
 -- Ein Punkt je Provider-Tick (2 s): gut zwei Minuten Rueckblick.
 local HISTORY_POINTS = 64
@@ -226,8 +224,13 @@ end)
 local bracket = sbar.add("bracket", "widgets.cpu_cores.bracket", members, {
   display = settings.primary_display,
   background = { color = colors.bg1 },
-  popup = { align = "right", height = ROW_HEIGHT },
+  popup = popup.host("right"),
 })
+
+local P = bracket.name
+popup.gap(P, "widgets.cpu_cores.gap.top", 6, { drawing = true })
+local header = popup.header(P, "widgets.cpu_cores.header", { drawing = true })
+header:set({ icon = { string = "Prozessor" }, label = { string = "letzte 2 Minuten" } })
 
 -- Der Verlauf der Gesamtauslastung, frueher ein eigenes Widget in der Bar.
 -- Im Popup stoert er nicht und beantwortet trotzdem die Frage, ob die aktuelle
@@ -240,70 +243,36 @@ local bracket = sbar.add("bracket", "widgets.cpu_cores.bracket", members, {
 history = sbar.add("graph", "widgets.cpu_cores.history", HISTORY_POINTS, {
   position = "popup." .. bracket.name,
   updates = true,
-  width = NAME_WIDTH + VALUE_WIDTH,
-  padding_left = ROW_PAD,
-  padding_right = ROW_PAD,
+  width = popup.WIDTH - 2 * popup.INSET,
+  padding_left = popup.INSET,
+  padding_right = popup.INSET,
   graph = { color = colors.blue, fill_color = colors.with_alpha(colors.blue, 0.25) },
   icon = { drawing = false },
   label = { drawing = false },
-  background = { drawing = false },
+  -- Unsichtbar, trägt nur die Höhe des Graphen (popup.height ist 1).
+  background = { drawing = true, color = colors.transparent, border_width = 0, height = 44 },
 })
 
 -- Zeilen einmal anlegen und später nur beschriften: im Update-Callback erzeugt
 -- jeder Durchlauf sonst neue Items.
+popup.rule(P, "widgets.cpu_cores.rule.procs", { drawing = true })
+popup.section(P, "widgets.cpu_cores.section", { drawing = true })
+  :set({ icon = { string = "Höchste Last" } })
+
 local proc_rows = {}
 for i = 1, TOP_ROWS do
-  proc_rows[i] = sbar.add("item", "widgets.cpu_cores.proc." .. i, {
-    position = "popup." .. bracket.name,
-    drawing = false,
-    padding_left = ROW_PAD,
-    padding_right = ROW_PAD,
-    icon = {
-      string = "",
-      width = NAME_WIDTH,
-      align = "left",
-      color = colors.white,
-      padding_left = ROW_PAD,
-      padding_right = 0,
-      font = { family = settings.font.text, size = ROW_FONT },
-    },
-    label = {
-      string = "",
-      width = VALUE_WIDTH,
-      align = "right",
-      padding_left = 0,
-      padding_right = ROW_PAD,
-      font = { family = settings.font.numbers, size = ROW_FONT },
-    },
+  proc_rows[i] = popup.row(P, "widgets.cpu_cores.proc." .. i, {
+    caption_width = NAME_WIDTH,
+    caption_color = colors.white,
   })
+  proc_rows[i]:set({ icon = { max_chars = NAME_CHARS } })
 end
 
 -- Der frühere click_script des Widgets lebt als letzte Popup-Zeile weiter.
-sbar.add("item", "widgets.cpu_cores.activity", {
-  position = "popup." .. bracket.name,
-  padding_left = ROW_PAD,
-  padding_right = ROW_PAD,
-  icon = {
-    string = "Aktivitätsanzeige öffnen",
-    width = NAME_WIDTH,
-    align = "left",
-    color = colors.grey,
-    padding_left = ROW_PAD,
-    padding_right = 0,
-    font = { family = settings.font.text, size = ROW_FONT },
-  },
-  label = {
-    string = "􀄯",
-    width = VALUE_WIDTH,
-    align = "right",
-    color = colors.grey,
-    padding_left = 0,
-    padding_right = ROW_PAD,
-    font = { family = settings.font.text, size = ROW_FONT },
-  },
-  click_script = "sketchybar --set " .. bracket.name ..
-    " popup.drawing=off; open -a 'Activity Monitor'",
-})
+popup.rule(P, "widgets.cpu_cores.rule.activity", { drawing = true })
+popup.action(P, "widgets.cpu_cores.activity", "Aktivitätsanzeige öffnen",
+  "sketchybar --set " .. P .. " popup.drawing=off; open -a 'Activity Monitor'")
+popup.gap(P, "widgets.cpu_cores.gap.bottom", 6, { drawing = true })
 
 local function fill_rows()
   sbar.exec(TOP_PROCS, function(out)

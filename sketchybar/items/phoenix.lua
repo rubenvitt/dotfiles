@@ -2,6 +2,7 @@ local colors = require("colors")
 local icons = require("icons")
 local svg = require("helpers.svg_icon")
 local settings = require("settings")
+local popup = require("helpers.popup")
 
 -- Aktuelle Position in der Phönix-Progression: Woche des laufenden
 -- Feuersturms in der Bar, die ganze Pyramide (Ära → Zyklus → Feuersturm →
@@ -30,13 +31,12 @@ local UPDATE_FREQ = 300
 local SCORE_FIRE = 85
 local SCORE_WARN = 60
 
--- Popup-Raster wie in items/weather.lua.
-local ROW_FONT = 11.0
-local ROW_HEIGHT = 20
-local ROW_PAD = 7
-local CAPTION_WIDTH = 84
-local VALUE_WIDTH = 236
+-- Popup im Stil der Systemmenüs (helpers/popup.lua), breiter als die
+-- Vorgabe: Zyklus und Feuersturm tragen Datumsbereiche.
+local WIDTH = 350
+local CAPTION_WIDTH = 96
 local MAX_TEXT_CHARS = 36
+local OPEN_MOC = "open 'obsidian://open?path=" .. MOC .. "'; sketchybar --set phoenix popup.drawing=off"
 
 local STATE = {
   feuer  = { icon = "phoenix.fire",        color = colors.orange, label = "Feuer" },
@@ -79,52 +79,45 @@ local phoenix = sbar.add("item", "phoenix", {
     },
     color = colors.grey,
   },
-  popup = {
-    align = "right",
-    height = ROW_HEIGHT,
-  },
+  popup = popup.host("right"),
   click_script = "sketchybar --set phoenix popup.drawing=toggle",
 })
 
-local function add_row(name, value_font)
-  return sbar.add("item", "phoenix." .. name, {
-    position = "popup.phoenix",
-    drawing = false,
-    padding_left = ROW_PAD,
-    padding_right = ROW_PAD,
-    icon = {
-      string = "",
-      width = CAPTION_WIDTH,
-      align = "left",
-      color = colors.grey,
-      padding_left = ROW_PAD,
-      padding_right = 0,
-      font = { family = settings.font.text, size = ROW_FONT },
-    },
-    label = {
-      string = "",
-      width = VALUE_WIDTH,
-      align = "right",
-      padding_left = 0,
-      padding_right = ROW_PAD,
-      font = { family = value_font or settings.font.text, size = ROW_FONT },
-    },
+local function add_row(name)
+  return popup.row("phoenix", "phoenix." .. name, {
+    width = WIDTH,
+    caption_width = CAPTION_WIDTH,
     -- Ein Klick auf eine Zeile oeffnet das Dashboard im Vault. Der Pfad ist
     -- fest und stammt nicht aus der Probe-Ausgabe.
-    click_script = "open 'obsidian://open?path=" .. MOC .. "'; sketchybar --set phoenix popup.drawing=off",
+    click_script = OPEN_MOC,
   })
 end
 
+local function add_rule(name)
+  return popup.rule("phoenix", "phoenix.rule." .. name, { width = WIDTH, drawing = true })
+end
+
+popup.gap("phoenix", "phoenix.gap.top", 6, { width = WIDTH, drawing = true })
+local header = popup.header("phoenix", "phoenix.header", {
+  width = WIDTH,
+  caption_width = CAPTION_WIDTH,
+  drawing = true,
+})
+header:set({ icon = { string = "Phönix" } })
+add_rule("pyramid")
 local rows = {
   aera = add_row("aera"),
   zyklus = add_row("zyklus"),
   feuersturm = add_row("feuersturm"),
-  woche = add_row("woche"),
   fokus = add_row("fokus"),
-  vorwoche = add_row("vorwoche", settings.font.numbers),
-  schnitt = add_row("schnitt", settings.font.numbers),
-  verlauf = add_row("verlauf"),
 }
+add_rule("scores")
+rows.vorwoche = add_row("vorwoche")
+rows.schnitt = add_row("schnitt")
+rows.verlauf = add_row("verlauf")
+add_rule("open")
+popup.action("phoenix", "phoenix.open", "Dashboard öffnen", OPEN_MOC, { width = WIDTH })
+popup.gap("phoenix", "phoenix.gap.bottom", 6, { width = WIDTH, drawing = true })
 
 local function update()
   sbar.exec(PROBE, function(out)
@@ -199,11 +192,8 @@ local function update()
     elseif s[2] == "asche" then
       week_text = state.label .. "  ·  noch " .. days_left .. " Tage"
     end
-    rows.woche:set({
-      drawing = true,
-      icon = { string = "Woche" },
-      label = { string = week_text, color = state.color },
-    })
+    -- Die Woche gehört in den Kopf: sie ist das, was die Bar auch zeigt.
+    header:set({ label = { string = week_text, color = state.color } })
 
     rows.fokus:set({
       drawing = feuer ~= nil and feuer[3] ~= "",

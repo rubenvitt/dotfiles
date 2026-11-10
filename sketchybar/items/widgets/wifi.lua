@@ -2,6 +2,7 @@ local icons = require("icons")
 local svg = require("helpers.svg_icon")
 local colors = require("colors")
 local settings = require("settings")
+local popup = require("helpers.popup")
 
 -- Execute the event provider binary which provides the event "network_update"
 -- for the network interface "en0", which is fired every 2.0 seconds.
@@ -11,7 +12,6 @@ sbar.exec("killall network_load >/dev/null; $CONFIG_DIR/helpers/event_providers/
 -- einem Rutsch raus ("Event not found", das Abo fehlt dann still).
 sbar.add("event", "network_update")
 
-local popup_width = 250
 
 local wifi_up = sbar.add("item", "widgets.wifi1", {
   display = settings.primary_display,
@@ -80,102 +80,47 @@ local wifi_bracket = sbar.add("bracket", "widgets.wifi.bracket", {
 }, {
   display = settings.primary_display,
   background = { color = colors.bg1 },
-  popup = { align = "center", height = 30 }
+  popup = popup.host("center"),
 })
 
-local ssid = sbar.add("item", "widgets.wifi.ssid", {
-  position = "popup." .. wifi_bracket.name,
-  icon = svg.icon("wifi.router", colors.white, {
-    font = {
-      style = settings.font.style_map["Bold"]
-    },
-  }),
-  width = popup_width,
-  align = "center",
-  label = {
-    font = {
-      size = 15,
-      style = settings.font.style_map["Bold"]
-    },
-    max_chars = 24,
-    string = "????????????",
-  },
-  background = {
-    height = 2,
-    color = colors.grey,
-    y_offset = -15
-  }
-})
+-- Popup wie das WLAN-Menü von macOS (helpers/popup.lua).
+local P = wifi_bracket.name
+local CAPTION = 134
+local VALUE = popup.WIDTH - 2 * popup.INSET - CAPTION
 
-local power = sbar.add("item", "widgets.wifi.power", {
-  position = "popup." .. wifi_bracket.name,
-  icon = {
-    align = "left",
-    string = "Wi-Fi:",
-    width = popup_width / 2,
-  },
-  label = svg.align_right(svg.icon("switch.off", colors.grey, {
-    width = popup_width / 2,
+local function info_row(name, caption, opts)
+  local o = { caption_width = CAPTION, drawing = true }
+  for k, v in pairs(opts or {}) do o[k] = v end
+  local row = popup.row(P, "widgets.wifi." .. name, o)
+  row:set({ icon = { string = caption }, label = { string = "…" } })
+  return row
+end
+
+local function switch(on)
+  local name = on and "switch.on" or "switch.off"
+  return svg.align_right(svg.icon(name, on and colors.green or colors.grey, {
+    width = VALUE + popup.INSET,
     align = "right",
-  }), "switch.off", popup_width / 2, 8)
-})
+  }), name, VALUE + popup.INSET, popup.INSET)
+end
 
-local hostname = sbar.add("item", "widgets.wifi.hostname", {
-  position = "popup." .. wifi_bracket.name,
-  icon = {
-    align = "left",
-    string = "Hostname:",
-    width = popup_width / 2,
-  },
-  label = {
-    max_chars = 20,
-    string = "????????????",
-    width = popup_width / 2,
-    align = "right",
-  }
-})
-
-local ip = sbar.add("item", "widgets.wifi.ip", {
-  position = "popup." .. wifi_bracket.name,
-  icon = {
-    align = "left",
-    string = "IP:",
-    width = popup_width / 2,
-  },
-  label = {
-    string = "???.???.???.???",
-    width = popup_width / 2,
-    align = "right",
-  }
-})
-
-local mask = sbar.add("item", "widgets.wifi.mask", {
-  position = "popup." .. wifi_bracket.name,
-  icon = {
-    align = "left",
-    string = "Subnet mask:",
-    width = popup_width / 2,
-  },
-  label = {
-    string = "???.???.???.???",
-    width = popup_width / 2,
-    align = "right",
-  }
-})
-
-local router = sbar.add("item", "widgets.wifi.router", {
-  position = "popup." .. wifi_bracket.name,
-  icon = {
-    align = "left",
-    string = "Router:",
-    width = popup_width / 2,
-  },
-  label = {
-    string = "???.???.???.???",
-    width = popup_width / 2,
-    align = "right",
-  },
-})
+popup.gap(P, "widgets.wifi.gap.top", 6, { drawing = true })
+local power = popup.header(P, "widgets.wifi.power", { drawing = true, caption_width = CAPTION })
+power:set({ icon = { string = "WLAN" }, label = switch(false) })
+popup.rule(P, "widgets.wifi.rule.network", { drawing = true })
+local ssid = info_row("ssid", "Netzwerk", { caption_color = colors.white })
+ssid:set({ label = { string = "????????????", max_chars = 24 } })
+popup.rule(P, "widgets.wifi.rule.details", { drawing = true })
+local hostname = info_row("hostname", "Hostname")
+hostname:set({ label = { max_chars = 20 } })
+local ip = info_row("ip", "IP-Adresse")
+local mask = info_row("mask", "Subnetzmaske")
+local router = info_row("router", "Router")
+popup.rule(P, "widgets.wifi.rule.settings", { drawing = true })
+popup.action(P, "widgets.wifi.settings", "WLAN-Einstellungen …",
+  "open 'x-apple.systempreferences:com.apple.wifi-settings-extension'; " ..
+  "sketchybar --set " .. P .. " popup.drawing=off")
+popup.gap(P, "widgets.wifi.gap.bottom", 6, { drawing = true })
 
 sbar.add("item", {
   display = settings.primary_display, position = "right", width = settings.group_paddings })
@@ -223,11 +168,7 @@ local wifi_on = false
 local function update_power()
   sbar.exec("networksetup -getairportpower en0", function(result)
     wifi_on = result:match(": On") ~= nil
-    power:set({
-      label = svg.align_right(
-        svg.icon(wifi_on and "switch.on" or "switch.off", wifi_on and colors.green or colors.grey),
-        wifi_on and "switch.on" or "switch.off", popup_width / 2, 8),
-    })
+    power:set({ label = switch(wifi_on) })
   end)
 end
 

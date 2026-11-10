@@ -2,6 +2,7 @@ local colors = require("colors")
 local icons = require("icons")
 local svg = require("helpers.svg_icon")
 local settings = require("settings")
+local popup = require("helpers.popup")
 
 -- Wetter am aktuellen Standort, mit Popup aus Details und Stundenvorschau.
 --
@@ -61,22 +62,11 @@ local BAR_LABEL_LEVEL = 4
 -- Grenze soll die sein, die im Helfer begruendet steht.
 local WARN_ROWS = 5
 
--- Popup im Stil des macOS-Wettermenüs: Kopf mit Ort, großer Temperatur und
--- Lage, darunter Stunden und Details als Listen, Haarlinien dazwischen. Alle
--- Zeilen haben dieselbe feste Breite, sonst stehen rechtsbündige Werte und
--- Trenner nicht untereinander.
-local INSET = 16
+-- Popup im Stil des macOS-Wettermenüs (helpers/popup.lua): Kopf mit Ort,
+-- großer Temperatur und Lage, darunter Stunden und Details als Listen.
 local CAPTION_WIDTH = 130
-local VALUE_WIDTH = 138
-local POPUP_WIDTH = INSET + CAPTION_WIDTH + VALUE_WIDTH + INSET
-local ROW_FONT = 13.0
-local ROW_HEIGHT = 26
--- Die Zeilenhöhe ist max(Item, popup.height). popup.height bleibt deshalb
--- winzig, und jede Zeile bringt ihre Höhe über background.height selbst mit
--- -- nur so können Kopf, Listen und Haarlinien verschieden hoch sein.
-local CELL = 1
 -- Spalte, in der das Wettersymbol der Stundenliste steht.
-local SYMBOL_X = INSET + 170
+local SYMBOL_X = popup.INSET + 170
 local FORECAST_ROWS = 3
 
 -- WMO-Wettercodes, wie Open-Meteo sie in weather_code liefert, auf Zustand und
@@ -179,73 +169,23 @@ local weather = sbar.add("item", "weather", {
     },
     color = colors.grey,
   },
-  popup = { align = "right", height = CELL },
+  popup = popup.host("right"),
   click_script = "sketchybar --set weather popup.drawing=toggle",
 })
 
 -- Zeilen einmal anlegen: im Update-Callback erzeugt entstuende bei jedem
 -- Durchlauf ein neuer Satz Items (siehe items/menus.lua).
 --
--- Eine Zeile ist ein Item: Beschriftung links im icon-Feld, Wert rechts im
--- label. Der unsichtbare Hintergrund trägt die Zeilenhöhe (siehe CELL).
 local function add_row(name, opts)
   opts = opts or {}
-  return sbar.add("item", "weather." .. name, {
-    position = "popup.weather",
-    drawing = false,
-    width = POPUP_WIDTH,
-    padding_left = 0,
-    padding_right = 0,
-    -- Rahmen und Rundung aus default.lua gelten Bar-Items, nicht Zeilen.
-    background = {
-      drawing = true,
-      color = colors.transparent,
-      border_width = 0,
-      corner_radius = 0,
-      height = opts.height or ROW_HEIGHT,
-      image = { border_width = 0, corner_radius = 0 },
-    },
-    icon = {
-      string = "",
-      -- Die Feldbreite schließt das Polster ein.
-      width = INSET + (opts.caption_width or CAPTION_WIDTH),
-      align = "left",
-      color = colors.popup.caption,
-      padding_left = INSET,
-      padding_right = 0,
-      font = opts.caption_font or { family = settings.font.text, style = "Regular", size = ROW_FONT },
-    },
-    label = {
-      string = "",
-      width = (opts.value_width or VALUE_WIDTH) + INSET,
-      align = "right",
-      color = colors.white,
-      padding_left = 0,
-      padding_right = INSET,
-      font = opts.value_font or { family = settings.font.text, style = "Regular", size = ROW_FONT },
-    },
-    click_script = opts.click_script,
-  })
+  opts.caption_width = opts.caption_width or CAPTION_WIDTH
+  return popup.row("weather", "weather." .. name, opts)
 end
 
--- Haarlinie zwischen zwei Abschnitten, links und rechts eingerückt. Ohne
--- Farbe ist sie ein Abstandhalter.
 local function add_rule(name, color, height)
-  return sbar.add("item", "weather." .. name, {
-    position = "popup.weather",
-    drawing = false,
-    width = POPUP_WIDTH - 2 * INSET,
-    padding_left = INSET,
-    padding_right = INSET,
-    icon = { drawing = false },
-    label = { drawing = false },
-    background = {
-      drawing = true,
-      color = color or colors.transparent,
-      border_width = 0,
-      corner_radius = 0,
-      height = height or 1,
-    },
+  return popup.rule("weather", "weather." .. name, {
+    color = color or colors.transparent,
+    height = height,
   })
 end
 
@@ -258,8 +198,7 @@ local top_gap = add_rule("gap.top", nil, 8)
 local warn_rows = {}
 for i = 1, WARN_ROWS do
   warn_rows[i] = add_row("warning." .. i, {
-    caption_width = CAPTION_WIDTH + VALUE_WIDTH - 90,
-    value_width = 90,
+    caption_width = popup.WIDTH - 2 * popup.INSET - 90,
   })
 end
 local warn_rule = add_rule("rule.warning", colors.popup.hairline)
@@ -268,13 +207,13 @@ local warn_gap = add_rule("gap.warning", nil, 8)
 -- Kopf: Ort und Lage, darunter groß die Temperatur und der Tagesbereich.
 local head_place = add_row("head.place", {
   height = 22,
-  caption_font = { family = settings.font.text, style = "Bold", size = 15.0 },
-  value_font = { family = settings.font.text, style = "Semibold", size = 12.0 },
+  caption_font = popup.font("Bold", 15.0),
+  value_font = popup.font("Semibold", 12.0),
 })
 local head_temp = add_row("head.temp", {
   height = 46,
-  caption_font = { family = settings.font.text, style = "Light", size = 38.0 },
-  value_font = { family = settings.font.text, style = "Semibold", size = 12.0 },
+  caption_font = popup.font("Light", 38.0),
+  value_font = popup.font("Semibold", 12.0),
 })
 
 local hour_rule = add_rule("rule.hours", colors.popup.hairline)
@@ -292,12 +231,8 @@ local detail_rows = {
 }
 
 add_rule("rule.open", colors.popup.hairline):set({ drawing = true })
-add_row("open", {
-  click_script = "open -a Weather; sketchybar --set weather popup.drawing=off",
-}):set({
-  drawing = true,
-  icon = { string = "„Wetter“ öffnen", color = colors.white },
-})
+popup.action("weather", "weather.open", "„Wetter“ öffnen",
+  "open -a Weather; sketchybar --set weather popup.drawing=off")
 add_rule("gap.bottom", nil, 6):set({ drawing = true })
 top_gap:set({ drawing = true })
 

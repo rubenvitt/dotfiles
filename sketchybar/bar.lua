@@ -2,7 +2,10 @@ local colors = require("colors")
 
 -- Equivalent to the --bar domain
 sbar.bar({
-  topmost = "window",
+  -- "on" legt die Bar über die macOS-Menüleiste (Ebene 25 statt 3). Die Leiste
+  -- bleibt eingeblendet: ausgeblendet fängt macOS 27 Klicks in den oberen 39 pt
+  -- ab, und die Items reagieren erst beim zweiten Klick.
+  topmost = "on",
   height = 40,
   color = colors.bar.bg,
   padding_right = 2,

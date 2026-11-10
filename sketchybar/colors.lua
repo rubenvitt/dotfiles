@@ -13,7 +13,8 @@ return {
   transparent = 0x00000000,
 
   bar = {
-    bg = 0xf02c2e34,
+    -- Deckend: die macOS-Menüleiste liegt direkt darunter (bar.lua).
+    bg = 0xff2c2e34,
     border = 0xff2c2e34,
   },
   popup = {

@@ -46,20 +46,20 @@ key-mapping.preset = 'qwerty'
 # Nur die Workspaces, die auch gebunden sind.
 persistent-workspaces = ['1', '2', '3', '4', '5', '6', '7', '8', '9']
 
-# Abstände. outer.top ist monitorabhängig, weil die macOS-Menüleiste
-# ausgeblendet ist (_HIHideMenuBar) und der nutzbare Bereich damit direkt
-# am oberen Rand beginnt:
+# Abstände. outer.top ist monitorabhängig. Die macOS-Menüleiste bleibt
+# eingeblendet (39 pt), die 40 pt hohe Bar liegt darüber (topmost=on): Bei
+# ausgeblendeter Leiste fängt macOS 27 Klicks in den oberen 39 pt ab, und die
+# Bar-Items reagieren erst beim zweiten Klick.
 #   built-in: der Notch-Bereich zählt ohnehin nicht zur nutzbaren Fläche,
-#             die 40px hohe Sketchybar liegt komplett darin → nur der
-#             normale 8er-Rand.
-#   extern:   dort gibt es keinen Notch, also Bar-Höhe (40) + 8 = 48,
-#             sonst verschwinden die Fenster hinter der Sketchybar.
+#             die Bar liegt komplett darin → nur der normale 8er-Rand.
+#   extern:   die nutzbare Fläche beginnt unter der Menüleiste (39), also
+#             40 - 39 + 8 = 9, sonst verschwinden die Fenster hinter der Bar.
 # Der letzte Eintrag der Liste ist der Default für alle übrigen Monitore.
 gaps.inner.horizontal = 8
 gaps.inner.vertical   = 8
 gaps.outer.left       = 8
 gaps.outer.bottom     = 8
-gaps.outer.top        = [{ monitor.'built-in' = 8 }, 48]
+gaps.outer.top        = [{ monitor.'built-in' = 8 }, 9]
 gaps.outer.right      = 8
 
 # Workspace- und Modus-Wechsel meldet mbar selbst an die Bar

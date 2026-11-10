@@ -2,6 +2,7 @@
 
 package.path = arg[0]:gsub("[^/]+$", "") .. "?.lua;" .. package.path
 package.preload["colors"] = function() return { transparent = 0 } end
+package.preload["settings"] = function() return { paddings = 3 } end
 package.preload["icons"] = function()
   return { battery = { _75 = "B75", _25 = "B25" }, warning = "W" }
 end
@@ -28,6 +29,8 @@ check("svg: string leer", with.string, "")
 check("svg: Bild", with.background.image.string, svg.dir .. "battery._75.svg")
 check("svg: Farbe am Bild", with.background.image.color, 0xffff0000)
 check("svg: keine icon.color", with.color, nil)
+check("svg: Abstand links am Bild", with.background.image.padding_left, 3)
+check("svg: Abstand rechts am Bild", with.background.image.padding_right, 4)
 check("svg: extra übernommen", with.padding_right, 4)
 
 local without = svg.icon("battery._25", 0xff00ff00)

@@ -115,8 +115,10 @@ local total = sbar.add("item", "widgets.cpu_cores.total", {
   icon = { drawing = false },
   label = {
     string = "--%",
-    width = settings.compact and 34 or 40,
-    align = "right",
+    -- Kompakt fehlen die Kernbalken; rechtsbündig stünde die Zahl dann weit
+    -- vom Icon ab. Linksbündig, Breite knapp für "100%", damit nichts springt.
+    width = settings.compact and 30 or 40,
+    align = settings.compact and "left" or "right",
     padding_left = settings.compact and 0 or 6,
     padding_right = 0,
     color = colors.white,

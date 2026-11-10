@@ -81,7 +81,7 @@ local ram = sbar.add("item", "widgets.memory.ram", {
   width = 0,
   update_freq = 8,
   icon = svg.icon("memory.ram", colors.grey, {
-    padding_right = 0,
+    padding_right = 3,
     font = { style = settings.font.style_map["Bold"], size = 9.0 },
   }),
   label = {
@@ -104,7 +104,7 @@ local disk = sbar.add("item", "widgets.memory.disk", {
   -- weckt nur die Platte.
   update_freq = 300,
   icon = svg.icon("memory.disk", colors.grey, {
-    padding_right = 0,
+    padding_right = 3,
     font = { style = settings.font.style_map["Bold"], size = 9.0 },
   }),
   label = {

@@ -7,6 +7,7 @@
 
 local colors = require("colors")
 local icons = require("icons")
+local settings = require("settings")
 
 local M = {}
 
@@ -43,10 +44,18 @@ function M.icon(name, color, extra)
   local p = M.path(name)
   if p then
     t.string = ""
+    -- Mit leerem string nimmt das Feld nur die Bildbreite ein (text_get_length:
+    -- max(Text + Abstände, Bild)), icon.padding_* gingen verloren. Deshalb
+    -- tragen die Abstände hier das Bild selbst, wie sonst die Glyphe.
     t.background = {
       drawing = true,
       color = colors.transparent,
-      image = { string = p, color = color },
+      image = {
+        string = p,
+        color = color,
+        padding_left = t.padding_left or settings.paddings,
+        padding_right = t.padding_right or settings.paddings,
+      },
     }
   else
     t.string = M.glyph(name)

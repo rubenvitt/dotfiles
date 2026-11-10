@@ -448,7 +448,10 @@ cal:subscribe("mouse.clicked", function(env)
     update()
     return
   end
-  popup_open = not popup_open
+  -- Aus dem Item lesen statt umschalten: popup_exclusive schließt das Popup
+  -- von außen, ein eigener Merker stünde dann falsch und der nächste Klick
+  -- ginge ins Leere.
+  popup_open = cal:query().popup.drawing == "off"
   if popup_open then render_popup() end
   cal:set({ popup = { drawing = popup_open } })
 end)

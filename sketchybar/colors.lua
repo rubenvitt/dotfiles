@@ -19,7 +19,12 @@ return {
   },
   popup = {
     bg = 0xc02c2e34,
-    border = 0xff7f8490
+    border = 0xff7f8490,
+    -- Auf Glas: der Hintergrund tönt nur, Rahmen und Trenner sind Haarlinien,
+    -- Beschriftungen gedämpftes Weiß statt Schiefergrau (wie die Systemmenüs).
+    glass_tint = 0x402c2e34,
+    hairline = 0x1fffffff,
+    caption = 0x99ffffff,
   },
   bg1 = 0xff363944,
   bg2 = 0xff414550,

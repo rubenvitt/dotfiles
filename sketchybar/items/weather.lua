@@ -61,16 +61,22 @@ local BAR_LABEL_LEVEL = 4
 -- Grenze soll die sein, die im Helfer begruendet steht.
 local WARN_ROWS = 5
 
--- Kompaktes Popup-Raster: die Vorgaben aus default.lua (14/13pt,
--- 28px Zeilen) sind fuer einzelne Items in der Leiste gedacht und erzeugen in
--- einer Liste vor allem Leerraum.
-local ROW_FONT = 11.0
--- Zeilenhoehe kommt von popup.height am Eltern-Item; ohne den Wert erbt jede
--- Zeile die Hoehe der Bar. background.height genuegt dafuer nicht.
-local ROW_HEIGHT = 20
-local ROW_PAD = 7
-local CAPTION_WIDTH = 78
-local VALUE_WIDTH = 116
+-- Popup im Stil des macOS-Wettermenüs: Kopf mit Ort, großer Temperatur und
+-- Lage, darunter Stunden und Details als Listen, Haarlinien dazwischen. Alle
+-- Zeilen haben dieselbe feste Breite, sonst stehen rechtsbündige Werte und
+-- Trenner nicht untereinander.
+local INSET = 16
+local CAPTION_WIDTH = 130
+local VALUE_WIDTH = 138
+local POPUP_WIDTH = INSET + CAPTION_WIDTH + VALUE_WIDTH + INSET
+local ROW_FONT = 13.0
+local ROW_HEIGHT = 26
+-- Die Zeilenhöhe ist max(Item, popup.height). popup.height bleibt deshalb
+-- winzig, und jede Zeile bringt ihre Höhe über background.height selbst mit
+-- -- nur so können Kopf, Listen und Haarlinien verschieden hoch sein.
+local CELL = 1
+-- Spalte, in der das Wettersymbol der Stundenliste steht.
+local SYMBOL_X = INSET + 170
 local FORECAST_ROWS = 3
 
 -- WMO-Wettercodes, wie Open-Meteo sie in weather_code liefert, auf Zustand und
@@ -78,34 +84,34 @@ local FORECAST_ROWS = 3
 -- drei Niesel-Stufen 51/53/55 unterscheiden sich in einem Balkendiagramm, nicht
 -- in einem 14 Punkt grossen Symbol.
 local CONDITION = {
-  [0] = { "clear", colors.yellow },        -- klar
-  [1] = { "clear", colors.yellow },        -- ueberwiegend klar
-  [2] = { "partly", colors.white },        -- teilweise bewoelkt
-  [3] = { "cloudy", colors.grey },         -- bedeckt
-  [45] = { "fog", colors.grey },           -- Nebel
-  [48] = { "fog", colors.grey },           -- Reifnebel
-  [51] = { "drizzle", colors.blue },       -- Niesel, leicht
-  [53] = { "drizzle", colors.blue },
-  [55] = { "drizzle", colors.blue },
-  [56] = { "sleet", colors.blue },         -- gefrierender Niesel
-  [57] = { "sleet", colors.blue },
-  [61] = { "rain", colors.blue },          -- Regen
-  [63] = { "rain", colors.blue },
-  [65] = { "heavy_rain", colors.blue },    -- Starkregen
-  [66] = { "sleet", colors.blue },         -- gefrierender Regen
-  [67] = { "sleet", colors.blue },
-  [71] = { "snow", colors.white },         -- Schneefall
-  [73] = { "snow", colors.white },
-  [75] = { "snow", colors.white },
-  [77] = { "snow_grains", colors.white },  -- Schneegriesel
-  [80] = { "showers", colors.blue },       -- Regenschauer
-  [81] = { "showers", colors.blue },
-  [82] = { "heavy_rain", colors.blue },    -- heftige Schauer
-  [85] = { "snow", colors.white },         -- Schneeschauer
-  [86] = { "snow", colors.white },
-  [95] = { "thunder", colors.orange },     -- Gewitter
-  [96] = { "hail", colors.orange },        -- Gewitter mit Hagel
-  [99] = { "hail", colors.orange },
+  [0] = { "clear", colors.yellow, "Klar" },        -- klar
+  [1] = { "clear", colors.yellow, "Überwiegend klar" },        -- ueberwiegend klar
+  [2] = { "partly", colors.white, "Teils bewölkt" },        -- teilweise bewoelkt
+  [3] = { "cloudy", colors.grey, "Bedeckt" },         -- bedeckt
+  [45] = { "fog", colors.grey, "Nebel" },           -- Nebel
+  [48] = { "fog", colors.grey, "Reifnebel" },           -- Reifnebel
+  [51] = { "drizzle", colors.blue, "Nieselregen" },       -- Niesel, leicht
+  [53] = { "drizzle", colors.blue, "Nieselregen" },
+  [55] = { "drizzle", colors.blue, "Nieselregen" },
+  [56] = { "sleet", colors.blue, "Gefrierender Niesel" },         -- gefrierender Niesel
+  [57] = { "sleet", colors.blue, "Gefrierender Niesel" },
+  [61] = { "rain", colors.blue, "Regen" },          -- Regen
+  [63] = { "rain", colors.blue, "Regen" },
+  [65] = { "heavy_rain", colors.blue, "Starkregen" },    -- Starkregen
+  [66] = { "sleet", colors.blue, "Gefrierender Regen" },         -- gefrierender Regen
+  [67] = { "sleet", colors.blue, "Gefrierender Regen" },
+  [71] = { "snow", colors.white, "Schneefall" },         -- Schneefall
+  [73] = { "snow", colors.white, "Schneefall" },
+  [75] = { "snow", colors.white, "Schneefall" },
+  [77] = { "snow_grains", colors.white, "Schneegriesel" },  -- Schneegriesel
+  [80] = { "showers", colors.blue, "Regenschauer" },       -- Regenschauer
+  [81] = { "showers", colors.blue, "Regenschauer" },
+  [82] = { "heavy_rain", colors.blue, "Heftige Schauer" },    -- heftige Schauer
+  [85] = { "snow", colors.white, "Schneeschauer" },         -- Schneeschauer
+  [86] = { "snow", colors.white, "Schneeschauer" },
+  [95] = { "thunder", colors.orange, "Gewitter" },     -- Gewitter
+  [96] = { "hail", colors.orange, "Gewitter mit Hagel" },        -- Gewitter mit Hagel
+  [99] = { "hail", colors.orange, "Gewitter mit Hagel" },
 }
 
 -- DWD-Warnstufen in der Reihenfolge des amtlichen Farbschemas: gelb, orange,
@@ -128,13 +134,13 @@ local WARN_COLOR = {
 local DAY_NIGHT = { clear = true, partly = true, showers = true }
 
 local function condition(code, is_day)
-  local entry = CONDITION[code] or { "cloudy", colors.grey }
+  local entry = CONDITION[code] or { "cloudy", colors.grey, "Bedeckt" }
   local key = entry[1]
   if DAY_NIGHT[key] then
     key = key .. (is_day and "_day" or "_night")
   end
   -- Name für svg_icon; die Glyphe dazu liefert svg.glyph.
-  return "weather." .. (icons.weather[key] and key or "cloudy"), entry[2]
+  return "weather." .. (icons.weather[key] and key or "cloudy"), entry[2], entry[3]
 end
 
 -- Ob eine Vorschaustunde noch in den Tag faellt. Gemessen wird die Mitte der
@@ -173,82 +179,127 @@ local weather = sbar.add("item", "weather", {
     },
     color = colors.grey,
   },
-  popup = {
-    align = "right",
-    height = ROW_HEIGHT,
-    background = {
-      border_width = 2,
-      border_color = colors.popup.border,
-      color = colors.popup.bg,
-      corner_radius = 9,
-    },
-  },
+  popup = { align = "right", height = CELL },
   click_script = "sketchybar --set weather popup.drawing=toggle",
 })
 
 -- Zeilen einmal anlegen: im Update-Callback erzeugt entstuende bei jedem
 -- Durchlauf ein neuer Satz Items (siehe items/menus.lua).
-local function add_row(name, value_font, caption_width, value_width)
+--
+-- Eine Zeile ist ein Item: Beschriftung links im icon-Feld, Wert rechts im
+-- label. Der unsichtbare Hintergrund trägt die Zeilenhöhe (siehe CELL).
+local function add_row(name, opts)
+  opts = opts or {}
   return sbar.add("item", "weather." .. name, {
     position = "popup.weather",
     drawing = false,
-    padding_left = ROW_PAD,
-    padding_right = ROW_PAD,
+    width = POPUP_WIDTH,
+    padding_left = 0,
+    padding_right = 0,
+    -- Rahmen und Rundung aus default.lua gelten Bar-Items, nicht Zeilen.
+    background = {
+      drawing = true,
+      color = colors.transparent,
+      border_width = 0,
+      corner_radius = 0,
+      height = opts.height or ROW_HEIGHT,
+      image = { border_width = 0, corner_radius = 0 },
+    },
     icon = {
       string = "",
-      width = caption_width or CAPTION_WIDTH,
+      -- Die Feldbreite schließt das Polster ein.
+      width = INSET + (opts.caption_width or CAPTION_WIDTH),
       align = "left",
-      color = colors.grey,
-      padding_left = ROW_PAD,
+      color = colors.popup.caption,
+      padding_left = INSET,
       padding_right = 0,
-      font = { family = settings.font.text, size = ROW_FONT },
+      font = opts.caption_font or { family = settings.font.text, style = "Regular", size = ROW_FONT },
     },
     label = {
       string = "",
-      width = value_width or VALUE_WIDTH,
+      width = (opts.value_width or VALUE_WIDTH) + INSET,
       align = "right",
+      color = colors.white,
       padding_left = 0,
-      padding_right = ROW_PAD,
-      font = { family = value_font, size = ROW_FONT },
+      padding_right = INSET,
+      font = opts.value_font or { family = settings.font.text, style = "Regular", size = ROW_FONT },
+    },
+    click_script = opts.click_script,
+  })
+end
+
+-- Haarlinie zwischen zwei Abschnitten, links und rechts eingerückt. Ohne
+-- Farbe ist sie ein Abstandhalter.
+local function add_rule(name, color, height)
+  return sbar.add("item", "weather." .. name, {
+    position = "popup.weather",
+    drawing = false,
+    width = POPUP_WIDTH - 2 * INSET,
+    padding_left = INSET,
+    padding_right = INSET,
+    icon = { drawing = false },
+    label = { drawing = false },
+    background = {
+      drawing = true,
+      color = color or colors.transparent,
+      border_width = 0,
+      corner_radius = 0,
+      height = height or 1,
     },
   })
 end
 
--- Warnzeilen zuerst: sketchybar ordnet ein Popup in der Reihenfolge, in der
--- seine Zeilen angelegt werden, und eine amtliche Warnung gehoert ueber die
--- Stundenvorschau.
---
--- Die Spalten sind breiter als unten (146 + 80 gegen 78 + 116). Ein
--- Ereignisname und ein Zeitraum passen in 194 Punkte schlicht nicht beide
--- hinein -- ausgemessen: das Dreieck kostet 26 Punkte, ein Zeichen gut 5, und
--- "13 – 18 Uhr" braucht 75. Das Popup ist also breiter, solange eine Warnung
--- ansteht. Das ist der bessere Handel als eine Zeile, die scrollt oder
--- abschneidet: Warnungen sind die Ausnahme, und wenn eine da ist, darf sie
--- den Platz haben.
-local WARN_CAPTION_WIDTH = 146
-local WARN_VALUE_WIDTH = 80
+local top_gap = add_rule("gap.top", nil, 8)
 
+-- Warnzeilen zuerst: sketchybar ordnet ein Popup in der Reihenfolge, in der
+-- seine Zeilen angelegt werden, und eine amtliche Warnung gehoert ueber das
+-- Wetter. Ereignisname und Zeitraum teilen sich die Breite anders als die
+-- übrigen Zeilen: "13 – 18 Uhr" braucht gut 75 Punkte, der Name den Rest.
 local warn_rows = {}
 for i = 1, WARN_ROWS do
-  warn_rows[i] = add_row("warning." .. i, settings.font.numbers,
-    WARN_CAPTION_WIDTH, WARN_VALUE_WIDTH)
+  warn_rows[i] = add_row("warning." .. i, {
+    caption_width = CAPTION_WIDTH + VALUE_WIDTH - 90,
+    value_width = 90,
+  })
 end
+local warn_rule = add_rule("rule.warning", colors.popup.hairline)
+local warn_gap = add_rule("gap.warning", nil, 8)
 
--- Der Ortsname ist Fliesstext, alles andere sind Zahlen, die untereinander
--- stehen sollen -- daher zwei verschiedene Schriften in der Wertspalte.
-local place_row = add_row("place", settings.font.text)
-local detail_rows = {
-  feels = add_row("feels", settings.font.numbers),
-  wind = add_row("wind", settings.font.numbers),
-  rain = add_row("rain", settings.font.numbers),
-  sun = add_row("sun", settings.font.numbers),
-  today = add_row("today", settings.font.numbers),
-}
+-- Kopf: Ort und Lage, darunter groß die Temperatur und der Tagesbereich.
+local head_place = add_row("head.place", {
+  height = 22,
+  caption_font = { family = settings.font.text, style = "Bold", size = 15.0 },
+  value_font = { family = settings.font.text, style = "Semibold", size = 12.0 },
+})
+local head_temp = add_row("head.temp", {
+  height = 46,
+  caption_font = { family = settings.font.text, style = "Light", size = 38.0 },
+  value_font = { family = settings.font.text, style = "Semibold", size = 12.0 },
+})
 
+local hour_rule = add_rule("rule.hours", colors.popup.hairline)
 local forecast_rows = {}
 for i = 1, FORECAST_ROWS do
-  forecast_rows[i] = add_row("forecast." .. i, settings.font.numbers)
+  forecast_rows[i] = add_row("forecast." .. i)
 end
+
+add_rule("rule.details", colors.popup.hairline):set({ drawing = true })
+local detail_rows = {
+  feels = add_row("feels"),
+  wind = add_row("wind"),
+  rain = add_row("rain"),
+  sun = add_row("sun"),
+}
+
+add_rule("rule.open", colors.popup.hairline):set({ drawing = true })
+add_row("open", {
+  click_script = "open -a Weather; sketchybar --set weather popup.drawing=off",
+}):set({
+  drawing = true,
+  icon = { string = "„Wetter“ öffnen", color = colors.white },
+})
+add_rule("gap.bottom", nil, 6):set({ drawing = true })
+top_gap:set({ drawing = true })
 
 -- Eigenes Item statt eines getauschten Wettersymbols: bei Sturm will man beides
 -- wissen, dass gewarnt ist und wie das Wetter gerade ist. Es steht links vom
@@ -298,7 +349,7 @@ local function update(relocate)
 
     age = tonumber(age)
     local stale = age > STALE_AFTER
-    local symbol, color = condition(tonumber(code), is_day == "1")
+    local symbol, color, text = condition(tonumber(code), is_day == "1")
     if stale then color = colors.grey end
     -- Gealterte Werte verlieren die Farbe im ganzen Popup, nicht nur in der
     -- Bar -- sie sagen geschlossen, wie es war, nicht wie es ist.
@@ -313,17 +364,27 @@ local function update(relocate)
     -- Ein Ort aus der Geo-IP-Rueckfallebene ist die Adresse des Providers und
     -- kann Hunderte Kilometer danebenliegen; das Zeichen sagt, dass hier
     -- geraten und nicht gemessen wurde. Gemessene Orte bleiben unmarkiert --
-    -- der Normalfall braucht keine Beschriftung.
-    local shown = place or "unbekannt"
+    -- der Normalfall braucht keine Beschriftung. Gealterte Daten sagen, wie
+    -- es war, nicht wie es ist -- das gehoert dazugeschrieben.
+    -- Der Ortsname stammt aus einer fremden Antwort und landet nur hier, nie
+    -- in einem click_script.
+    local shown = place or "Unbekannter Ort"
     if place and origin == "ip" then shown = "≈ " .. place end
+    if stale then shown = shown .. " · vor " .. human_age(age) end
 
-    place_row:set({
-      drawing = place ~= nil or stale,
-      icon = { string = "Ort" },
+    local tmax, tmin, sunrise, sunset =
+      string.match(day or "", "^D|(%-?%d+)|(%-?%d+)|([%d:]+)|([%d:]+)$")
+
+    head_place:set({
+      drawing = true,
+      icon = { string = shown, color = value_color },
+      label = { string = text, color = value_color },
+    })
+    head_temp:set({
+      drawing = true,
+      icon = { string = temp .. "°", color = value_color },
       label = {
-        -- Der Ortsname stammt aus einer fremden Antwort und landet nur hier,
-        -- nie in einem click_script.
-        string = shown,
+        string = tmax and ("H: " .. tmax .. "°  T: " .. tmin .. "°") or "",
         color = value_color,
       },
     })
@@ -343,45 +404,47 @@ local function update(relocate)
       icon = { string = "Regen" },
       label = { string = rain .. " %", color = value_color },
     })
-
-    local tmax, tmin, sunrise, sunset =
-      string.match(day or "", "^D|(%-?%d+)|(%-?%d+)|([%d:]+)|([%d:]+)$")
-    detail_rows.today:set({
-      drawing = tmax ~= nil,
-      icon = { string = "Heute" },
-      label = { string = tmax and (tmin .. "° – " .. tmax .. "°") or "", color = value_color },
-    })
     detail_rows.sun:set({
       drawing = sunrise ~= nil,
       icon = { string = "Sonne" },
       label = { string = sunrise and (sunrise .. " – " .. sunset) or "", color = value_color },
     })
 
+    local any_hour = false
     for i = 1, FORECAST_ROWS do
       local hour, hcode, htemp, hrain =
         string.match(hours[i] or "", "^H|(%d+)|(%d+)|(%-?%d+)|(%d+)$")
       if hour then
-        -- Das Symbol steht in der Beschriftungsspalte, weil nur die in der
-        -- Textschrift gesetzt ist; die Wertspalte laeuft in SF Mono, dort
-        -- faende sich kein Glyph dafuer.
+        any_hour = true
         local hday = daylight_at(hour, sunrise, sunset)
         if hday == nil then hday = (is_day == "1") end
-        local hsymbol = condition(tonumber(hcode), hday)
+        local hsymbol, hcolor = condition(tonumber(hcode), hday)
+        if stale then hcolor = colors.grey end
+        -- Regen nur, wenn er droht: eine Spalte voller "0 %" ist Rauschen.
+        local value = htemp .. "°"
+        if tonumber(hrain) >= 10 then value = hrain .. " %   " .. value end
+        -- Das Symbol steht als Bild des Zeilenhintergrunds in einer festen
+        -- Spalte; nur ohne SVG wandert die Glyphe in den Wert.
+        local path = svg.path(hsymbol)
+        if not path then value = svg.glyph(hsymbol) .. "   " .. value end
         forecast_rows[i]:set({
           drawing = true,
-          icon = { string = svg.glyph(hsymbol) .. "  " .. hour .. " Uhr" },
-          label = { string = htemp .. "° · " .. hrain .. " %", color = value_color },
+          icon = { string = hour .. " Uhr", color = value_color },
+          label = { string = value, color = value_color },
+          background = {
+            image = {
+              drawing = path ~= nil,
+              string = path or "",
+              color = hcolor,
+              padding_left = SYMBOL_X,
+            },
+          },
         })
       else
         forecast_rows[i]:set({ drawing = false })
       end
     end
-
-    -- Gealterte Daten sagen, wie es war, nicht wie es ist -- das gehoert
-    -- dazugeschrieben, sonst sieht die Bar nur falsch aus.
-    if stale then
-      place_row:set({ icon = { string = "Ort · vor " .. human_age(age) } })
-    end
+    hour_rule:set({ drawing = any_hour })
   end)
 end
 
@@ -425,6 +488,8 @@ local function update_warnings()
     if state ~= "de" then
       alert:set({ drawing = false })
       for i = 1, WARN_ROWS do warn_rows[i]:set({ drawing = false }) end
+      warn_rule:set({ drawing = false })
+      warn_gap:set({ drawing = false })
       return
     end
 
@@ -448,6 +513,8 @@ local function update_warnings()
         warn_rows[i]:set({ drawing = false })
       end
     end
+    warn_rule:set({ drawing = warnings[1] ~= nil })
+    warn_gap:set({ drawing = warnings[1] ~= nil })
 
     -- In der Bar steht nur, was die Schwelle nimmt: ab Stufe 2, und jede
     -- Meldung des Bevoelkerungsschutzes. Der Helfer sortiert nach Stufe, die

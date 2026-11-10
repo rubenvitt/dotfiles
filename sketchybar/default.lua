@@ -36,7 +36,17 @@ sbar.default({
       border_width = 1
     }
   },
-  popup = {
+  popup = settings.glass and {
+    glass = true,
+    -- Die SkyLight-Unschärfe unter dem Glas trübt es nur.
+    blur_radius = 0,
+    background = {
+      border_width = 1,
+      corner_radius = 16,
+      border_color = colors.popup.hairline,
+      color = colors.popup.glass_tint,
+    },
+  } or {
     background = {
       border_width = 2,
       corner_radius = 9,

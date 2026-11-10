@@ -1,4 +1,5 @@
 local colors = require("colors")
+local settings = require("settings")
 
 -- Equivalent to the --bar domain
 sbar.bar({
@@ -15,4 +16,7 @@ sbar.bar({
   -- verdeckt die Uhr. mbar-Erweiterung: rechte Items rücken links neben den
   -- Punkt, solange er sichtbar ist.
   privacy_indicator_inset = true,
+  -- mbar-Erweiterung (ab 0.9, wie das Glas): ein geöffnetes Popup schließt
+  -- alle anderen. nil lässt den Schlüssel weg, 0.8 meldete ihn als Fehler.
+  popup_exclusive = settings.glass or nil,
 })

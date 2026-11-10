@@ -82,12 +82,6 @@ local phoenix = sbar.add("item", "phoenix", {
   popup = {
     align = "right",
     height = ROW_HEIGHT,
-    background = {
-      border_width = 2,
-      border_color = colors.popup.border,
-      color = colors.popup.bg,
-      corner_radius = 9,
-    },
   },
   click_script = "sketchybar --set phoenix popup.drawing=toggle",
 })

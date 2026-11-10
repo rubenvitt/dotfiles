@@ -12,8 +12,9 @@ Das Wetter kommt von Witterung, dem eigenen Aggregator des Nutzers (Konsens aus
 mehreren Modellen, dazu gemessene Werte der nächsten DWD-Station). Adresse und
 Bearer-Token stehen nicht hier, weil dieses Repo öffentlich ist, sondern im
 Schlüsselbund unter dem Dienst dev.rubeen.witterung (Konto = Adresse,
-Passwort = Token). Einrichten, nachdem auf dem Server
-`docker exec witterung witterung device-add Mac-Leiste` das Token ausgegeben hat:
+Passwort = Token). Das Token erzeugt die Web-App unter Verwaltung -> Geräte
+(oder auf dem Server `docker exec witterung witterung device-add Mac-Leiste`),
+eingetragen wird es so:
 
     security add-generic-password -U -s dev.rubeen.witterung -a https://<host> -w
 

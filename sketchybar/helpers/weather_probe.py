@@ -451,11 +451,13 @@ def witterung_lines(data):
         round(temp), round(feels if feels is not None else temp),
         round(wind or 0), round(rain or 0),
     )
-    # hourly[0] ist die laufende Stunde; die Vorschau beginnt mit der nächsten.
+    # Ab der nächsten Stunde nach der Uhr, nicht nach Position: ein gealterter
+    # Cache zeigte sonst eine "Vorschau" auf Stunden, die schon vorbei sind.
     hours = []
-    for h in hourly[1:4]:
+    for h in hourly:
         c = h.get("consensus") or {}
-        if c.get("temp_c") is None:
+        if len(hours) == 3 or c.get("temp_c") is None \
+                or datetime.fromisoformat(h["at"].replace("Z", "+00:00")).timestamp() <= time.time():
             continue
         hours.append((time.strftime("%H", local_time(h["at"])),
                       WITTERUNG_WMO.get(c.get("condition"), 3),

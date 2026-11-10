@@ -12,6 +12,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import weather_probe as wx  # noqa: E402
 
 TODAY = time.strftime("%Y-%m-%d")
+HOUR = int(time.time()) // 3600 * 3600
+
+
+def at(offset):
+    """RFC-3339-Zeitpunkt `offset` Stunden nach Beginn der laufenden Stunde."""
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(HOUR + offset * 3600))
 
 
 def hour(at, cond, temp, prob):
@@ -20,7 +26,7 @@ def hour(at, cond, temp, prob):
 
 
 class WitterungLines(unittest.TestCase):
-    def sample(self, observed):
+    def sample(self, observed, shift=0):
         return {
             "now": {
                 "observed": observed,
@@ -29,12 +35,12 @@ class WitterungLines(unittest.TestCase):
                              "is_day": True},
             },
             "hourly": [
-                dict(hour("2026-11-10T12:00:00Z", "rain", 4.4, None),
+                dict(hour(at(shift), "rain", 4.4, None),
                      spread={"precip_agreement_pct": 67}),
-                hour("2026-11-10T13:00:00Z", "thunderstorm", 5.6, 40),
-                hour("2026-11-10T14:00:00Z", "wind", 5.0, None),
-                hour("2026-11-10T15:00:00Z", "unbekannt", 4.0, 10),
-                hour("2026-11-10T16:00:00Z", "clear", 3.0, 0),
+                hour(at(shift + 1), "thunderstorm", 5.6, 40),
+                hour(at(shift + 2), "wind", 5.0, None),
+                hour(at(shift + 3), "unbekannt", 4.0, 10),
+                hour(at(shift + 4), "clear", 3.0, 0),
             ],
             "daily": [{"date": TODAY, "consensus": {
                 "temp_min_c": 1.2, "temp_max_c": 7.6,
@@ -52,7 +58,12 @@ class WitterungLines(unittest.TestCase):
         self.assertEqual([h[1:] for h in hours],
                          [(95, 6, 40), (3, 5, 0), (3, 4, 10)])
         self.assertEqual(hours[0][0], time.strftime(
-            "%H", wx.local_time("2026-11-10T13:00:00Z")))
+            "%H", time.localtime(HOUR + 3600)))
+
+    def test_aged_cache_skips_past_hours(self):
+        # Antwort von vor zwei Stunden: nur ihre Stunden 4 und 5 liegen noch vorn.
+        _, _, hours = wx.witterung_lines(self.sample(None, shift=-2))
+        self.assertEqual([h[1:] for h in hours], [(3, 4, 10), (0, 3, 0)])
 
     def test_forecast_without_station(self):
         current, _, _ = wx.witterung_lines(self.sample(None))

@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# timingwatch - Startet Timing neu, sobald es nicht mehr läuft
+set -euo pipefail
+
+# Warum es dieses Skript gibt: Timing beendet sich ab und zu still im
+# Hintergrund, und solange es nicht läuft, zeichnet es keine Zeit auf.
+# Aufgezeichnet wird von TimingHelper (Anmeldeobjekt ohne Fenster), nicht von
+# der Oberfläche Timing.app — nur der Helper wird bewacht, sonst holte jeder
+# Neustart der bewusst geschlossenen Oberfläche ihr Fenster nach vorn.
+#
+# launchd fragt einmal pro Minute nach; das kostet einen pgrep-Aufruf. KeepAlive
+# auf das App-Binary taugt nicht: es liefe als zweite Instanz neben Timings
+# eigenem Anmeldeobjekt, erbte die Hintergrund-Drosselung des Jobs und bräche,
+# wenn Sparkle das Bundle beim Update austauscht. Deshalb startet `open` die App
+# über LaunchServices — mit -g, damit der Neustart nicht den Fokus stiehlt.
+
+LABEL="dev.rubeen.timingwatch"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+SERVICE="gui/$(id -u)/$LABEL"
+LOG="$HOME/Library/Logs/timingwatch.log"
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+HELPER_APP="/Applications/Timing.app/Contents/Library/LoginItems/TimingHelper.app"
+PROCESS="TimingHelper"
+
+usage() {
+  cat <<EOF
+timingwatch - Startet Timing neu, sobald es nicht mehr läuft
+
+  timingwatch check       TimingHelper starten, falls er nicht läuft (ruft launchd jede Minute auf)
+  timingwatch install     LaunchAgent einrichten
+  timingwatch uninstall   LaunchAgent entfernen — nötig, wenn Timing bewusst beendet bleiben soll
+  timingwatch status      LaunchAgent, Timing-Prozess und letzte Neustarts zeigen
+EOF
+}
+
+die() { printf 'timingwatch: %s\n' "$*" >&2; exit 1; }
+
+do_check() {
+  # Nie `open` auf eine laufende App: das schickt ein Reopen und holt ihr Fenster nach vorn.
+  /usr/bin/pgrep -xq "$PROCESS" && return 0
+  printf '%s TimingHelper lief nicht — neu gestartet\n' "$(date '+%F %T')" >> "$LOG"
+  /usr/bin/open -g -j "$HELPER_APP"
+}
+
+do_install() {
+  mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
+  # Kein RunAtLoad: beim Login liefe der Check sonst gegen Timings eigenes Anmeldeobjekt.
+  cat > "$PLIST" <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>$LABEL</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>$SELF</string>
+		<string>check</string>
+	</array>
+	<key>StartInterval</key>
+	<integer>60</integer>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>StandardOutPath</key>
+	<string>/dev/null</string>
+	<key>StandardErrorPath</key>
+	<string>$LOG</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/usr/bin:/bin:/usr/sbin:/sbin</string>
+	</dict>
+</dict>
+</plist>
+PLIST_EOF
+  launchctl bootout "$SERVICE" 2>/dev/null || true
+  # bootout kehrt zurück, bevor der Dienst ganz weg ist; ein sofortiges
+  # bootstrap scheitert dann mit "Input/output error".
+  for _ in $(seq 1 25); do
+    launchctl print "$SERVICE" >/dev/null 2>&1 || break
+    sleep 0.2
+  done
+  launchctl bootstrap "gui/$(id -u)" "$PLIST" || die "LaunchAgent nicht geladen"
+  printf 'LaunchAgent geladen: %s (prüft jede Minute)\n' "$LABEL"
+}
+
+do_uninstall() {
+  launchctl bootout "$SERVICE" 2>/dev/null || true
+  rm -f "$PLIST"
+  printf 'LaunchAgent entfernt: %s\n' "$LABEL"
+}
+
+do_status() {
+  if launchctl print "$SERVICE" >/dev/null 2>&1; then
+    printf 'LaunchAgent: geladen (%s)\n' "$LABEL"
+  else
+    printf 'LaunchAgent: NICHT geladen — timingwatch install\n'
+  fi
+  if pid="$(/usr/bin/pgrep -x "$PROCESS")"; then
+    printf 'TimingHelper: läuft (PID %s)\n' "$pid"
+  else
+    printf 'TimingHelper: läuft NICHT\n'
+  fi
+  if [[ -f "$LOG" ]]; then
+    printf '\nLetzte Einträge (%s):\n' "$LOG"
+    tail -n 10 "$LOG"
+  fi
+}
+
+case "${1:-}" in
+  check)            do_check ;;
+  install)          do_install ;;
+  uninstall)        do_uninstall ;;
+  status)           do_status ;;
+  -h|--help|help|"") usage ;;
+  *)                usage >&2; exit 1 ;;
+esac

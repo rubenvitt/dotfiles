@@ -12,7 +12,7 @@ local svg = require("helpers.svg_icon")
 -- Zeile kopiert ihren Wert, ein Klick auf einen Tag im Kalender sein Datum.
 --
 -- Termin-Countdown: eine Stunde vor dem nächsten Termin erscheint links in
--- der Uhr-Insel eine kleine Pille (−42m). Ab 15 Minuten wird sie kräftiger
+-- der Uhr-Insel eine kleine Pille (42m). Ab 15 Minuten wird sie kräftiger
 -- und die Insel färbt sich gelb, ab 5 Minuten rot, zum Beginn steht dort zwei
 -- Minuten lang "jetzt". Die Termine liefert helpers/calendar/next_events, ein
 -- eigener LaunchAgent (warum, steht dort); die Bar liest nur dessen Datei.
@@ -46,7 +46,7 @@ local NEXT_FILE = MODE_DIR .. "/next_events"
 local NEXT_WINDOW = 60 * 60   -- ab hier erscheint der Countdown
 local NEXT_NOW = 2 * 60       -- so lange nach Beginn steht "jetzt" da
 local NEXT_STALE = 60 * 60    -- älter: Helfer läuft nicht, nichts anzeigen
--- Feste Breite für fünf Zeichen ("jetzt", "−60m"), damit die Insel nicht
+-- Feste Breite für fünf Zeichen ("jetzt", "60m"), damit die Insel nicht
 -- bei jedem Stellenwechsel springt.
 local NEXT_WIDTH = 40
 
@@ -373,7 +373,7 @@ local function render_next()
   if stage then
     next_pill:set({
       drawing = true,
-      label = { string = minutes == 0 and "jetzt" or ("−" .. minutes .. "m"), color = stage.text },
+      label = { string = minutes == 0 and "jetzt" or (minutes .. "m"), color = stage.text },
       background = { color = stage.pill },
     })
   else
